@@ -1,0 +1,42 @@
+.gridcontainer{
+height: 100vh;
+display: grid;
+grid-template-columns: 1fr 3fr ;
+gap: 10px;
+grid-template-areas:
+"Headergrid";
+
+grid-template-rows: 40px 1fr 1fr  40px 30px;
+}
+
+.Header{
+
+background-color: green
+grid-area: Headergrid;
+
+}
+
+.Ads{
+
+background-color: blue
+
+}
+
+.Nav{
+
+background-color: yellow
+
+}
+
+.Article{
+
+background-color: orange
+
+}
+
+.Footer{
+
+background-color: red
+
+}
+
