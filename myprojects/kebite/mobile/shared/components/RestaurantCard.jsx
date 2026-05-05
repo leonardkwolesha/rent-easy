@@ -1,12 +1,13 @@
+import { useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW, SPACING, FONT_SIZE, FONT_WEIGHT } from '../theme';
 import { formatMoney } from '../formatters';
 
-// Reusable restaurant card used across Home and Restaurants screens.
-// Displays image, name, rating, delivery time, and fee.
 export default function RestaurantCard({ restaurant, onPress, style }) {
   const isOpen = restaurant.isOpen !== false;
+  const [imgFailed, setImgFailed] = useState(false);
 
   return (
     <TouchableOpacity
@@ -17,12 +18,21 @@ export default function RestaurantCard({ restaurant, onPress, style }) {
       style={[styles.card, style]}
     >
       <View style={styles.imageWrap}>
-        <Image
-          source={{ uri: restaurant.image || `https://placehold.co/400x200/ff6b00/fff?text=🍽` }}
-          style={styles.image}
-          resizeMode="cover"
-          onError={() => {}}
-        />
+        {restaurant.image && !imgFailed ? (
+          <Image
+            source={{ uri: restaurant.image }}
+            style={styles.image}
+            resizeMode="cover"
+            onError={() => setImgFailed(true)}
+          />
+        ) : (
+          <LinearGradient
+            colors={['#f97316', '#e8521a']}
+            style={[styles.image, styles.imagePlaceholder]}
+          >
+            <Ionicons name="restaurant" size={44} color="rgba(255,255,255,0.55)" />
+          </LinearGradient>
+        )}
         <View style={[styles.statusBadge, isOpen ? styles.openBadge : styles.closedBadge]}>
           <Text style={[styles.badgeText, isOpen ? styles.openText : styles.closedText]}>
             {isOpen ? 'Open' : 'Closed'}
@@ -63,8 +73,9 @@ const styles = StyleSheet.create({
     overflow:        'hidden',
     ...SHADOW.md,
   },
-  imageWrap:    { position: 'relative' },
-  image:        { width: '100%', height: 148, backgroundColor: COLORS.border },
+  imageWrap:        { position: 'relative' },
+  image:            { width: '100%', height: 148, backgroundColor: COLORS.border },
+  imagePlaceholder: { alignItems: 'center', justifyContent: 'center' },
   statusBadge:  { position: 'absolute', top: SPACING.sm, left: SPACING.sm,
                   paddingHorizontal: SPACING.sm, paddingVertical: 4, borderRadius: RADIUS.pill },
   openBadge:    { backgroundColor: COLORS.successBg },

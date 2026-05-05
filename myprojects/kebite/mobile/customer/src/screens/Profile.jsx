@@ -48,7 +48,8 @@ export default function Profile({ navigation }) {
   const [saving,  setSaving]  = useState(false);
 
   // Password modal
-  const [pwOpen, setPwOpen] = useState(false);
+  const [pwOpen,     setPwOpen]     = useState(false);
+  const [topUpOpen,  setTopUpOpen]  = useState(false);
 
   function startEdit(field) {
     setEditing(field);
@@ -98,13 +99,14 @@ export default function Profile({ navigation }) {
   function confirmLogout() {
     Alert.alert('Sign out', 'Are you sure you want to sign out?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign out', style: 'destructive',
-        onPress: async () => { disconnectSocket(); await logout(); } },
+      {
+        text: 'Sign out', style: 'destructive',
+        onPress: async () => {
+          try { disconnectSocket(); } catch {}
+          try { await logout(); } catch {}
+        },
+      },
     ]);
-  }
-
-  function topUp() {
-    Alert.alert('Top up wallet', 'Choose your payment method to add funds.');
   }
 
   const orderCount = user?.orderCount ?? 0;
@@ -154,7 +156,7 @@ export default function Profile({ navigation }) {
               <Text style={styles.walletLabel}>Available balance</Text>
               <Text style={styles.walletAmount}>{formatMoney(wallet)}</Text>
             </View>
-            <TouchableOpacity onPress={topUp} style={styles.topUpBtn} accessibilityLabel="Top up wallet">
+            <TouchableOpacity onPress={() => setTopUpOpen(true)} style={styles.topUpBtn} accessibilityLabel="Top up wallet">
               <Ionicons name="add" size={18} color={COLORS.white} />
               <Text style={styles.topUpText}>Top Up</Text>
             </TouchableOpacity>
@@ -283,6 +285,15 @@ export default function Profile({ navigation }) {
       </ScrollView>
 
       <ChangePasswordModal visible={pwOpen} onClose={() => setPwOpen(false)} />
+      <TopUpModal
+        visible={topUpOpen}
+        phone={user?.phone}
+        onClose={() => setTopUpOpen(false)}
+        onSuccess={(newBalance) => {
+          setTopUpOpen(false);
+          if (newBalance !== undefined) setUser((u) => u ? { ...u, walletBalance: newBalance } : u);
+        }}
+      />
     </View>
   );
 }
@@ -407,6 +418,155 @@ function LangBtn({ label, active, onPress }) {
 }
 
 function Divider() { return <View style={styles.divider} />; }
+
+// ── Top-up modal ───────────────────────────────────────────────────────────
+
+const QUICK_AMOUNTS = [5000, 10000, 20000, 50000];
+const PAY_METHODS   = [
+  { id: 'mpesa',  label: 'M-Pesa',      icon: 'phone-portrait-outline' },
+  { id: 'airtel', label: 'Airtel Money', icon: 'phone-portrait-outline' },
+  { id: 'tigo',   label: 'Tigo Pesa',   icon: 'phone-portrait-outline' },
+];
+
+function TopUpModal({ visible, phone, onClose, onSuccess }) {
+  const [amount,  setAmount]  = useState('');
+  const [method,  setMethod]  = useState('mpesa');
+  const [tel,     setTel]     = useState(phone || '');
+  const [busy,    setBusy]    = useState(false);
+  const [errMsg,  setErrMsg]  = useState('');
+
+  useEffect(() => { if (phone) setTel(phone); }, [phone]);
+
+  function reset() { setAmount(''); setMethod('mpesa'); setErrMsg(''); }
+  function close()  { reset(); onClose?.(); }
+
+  async function submit() {
+    const amt = parseInt(amount, 10);
+    if (!amt || amt < 1000) { setErrMsg('Minimum top-up is TSh 1,000'); return; }
+    if (!tel.trim())        { setErrMsg('Enter your phone number'); return; }
+    setErrMsg(''); setBusy(true);
+    try {
+      const res = await api.post('/payments/topup', {
+        amount: amt, method, phone: tel.trim(),
+      });
+      Alert.alert(
+        'Top-up initiated',
+        `You'll receive a ${PAY_METHODS.find((m) => m.id === method)?.label} prompt shortly.`,
+        [{ text: 'OK', onPress: () => onSuccess?.(res.data?.walletBalance) }]
+      );
+    } catch (err) {
+      setErrMsg(err?.response?.data?.message || 'Could not initiate top-up. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={close}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.modalBackdrop}
+      >
+        <View style={styles.modalCard}>
+          <View style={topUp.handle} />
+          <Text style={styles.modalTitle}>Top up wallet</Text>
+          <Text style={styles.modalHint}>Add funds using mobile money.</Text>
+
+          {/* Quick amount chips */}
+          <View style={topUp.amtRow}>
+            {QUICK_AMOUNTS.map((a) => (
+              <TouchableOpacity
+                key={a}
+                onPress={() => setAmount(String(a))}
+                style={[topUp.amtChip, String(a) === amount && topUp.amtChipActive]}
+              >
+                <Text style={[topUp.amtChipText, String(a) === amount && topUp.amtChipTextActive]}>
+                  {a.toLocaleString()}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <TextInput
+            value={amount}
+            onChangeText={(v) => { setAmount(v.replace(/[^0-9]/g, '')); setErrMsg(''); }}
+            placeholder="Or enter amount (TSh)"
+            placeholderTextColor={COLORS.textLight}
+            keyboardType="numeric"
+            editable={!busy}
+            style={styles.modalInput}
+          />
+
+          {/* Payment methods */}
+          <Text style={topUp.sectionLabel}>Payment method</Text>
+          {PAY_METHODS.map((m) => (
+            <TouchableOpacity
+              key={m.id}
+              onPress={() => setMethod(m.id)}
+              style={[topUp.methodRow, method === m.id && topUp.methodRowActive]}
+            >
+              <Ionicons
+                name={m.icon}
+                size={20}
+                color={method === m.id ? COLORS.activeOrange : COLORS.textMuted}
+              />
+              <Text style={[topUp.methodLabel, method === m.id && topUp.methodLabelActive]}>
+                {m.label}
+              </Text>
+              <View style={[topUp.radio, method === m.id && topUp.radioActive]}>
+                {method === m.id && <View style={topUp.radioDot} />}
+              </View>
+            </TouchableOpacity>
+          ))}
+
+          {/* Phone */}
+          <TextInput
+            value={tel}
+            onChangeText={(v) => { setTel(v); setErrMsg(''); }}
+            placeholder="+255 7XX XXX XXX"
+            placeholderTextColor={COLORS.textLight}
+            keyboardType="phone-pad"
+            editable={!busy}
+            style={[styles.modalInput, { marginTop: SPACING.sm }]}
+          />
+
+          {errMsg ? <Text style={topUp.errMsg}>{errMsg}</Text> : null}
+
+          <View style={{ flexDirection: 'row', gap: SPACING.sm, marginTop: SPACING.md }}>
+            <TouchableOpacity onPress={close} disabled={busy} style={[styles.modalBtn, styles.modalBtnCancel]}>
+              <Text style={styles.modalBtnCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={submit} disabled={busy} style={[styles.modalBtn, styles.modalBtnPrimary]}>
+              {busy
+                ? <ActivityIndicator size="small" color={COLORS.white} />
+                : <Text style={styles.modalBtnPrimaryText}>Pay now</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+const topUp = StyleSheet.create({
+  handle:     { width: 40, height: 4, borderRadius: 2, backgroundColor: COLORS.border, alignSelf: 'center', marginBottom: SPACING.md },
+  amtRow:     { flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.md, flexWrap: 'wrap' },
+  amtChip:    { paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm, borderRadius: RADIUS.pill, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.pageBg },
+  amtChipActive:    { backgroundColor: COLORS.activeOrange, borderColor: COLORS.activeOrange },
+  amtChipText:      { color: COLORS.textBody, fontWeight: FONT_WEIGHT.semibold, fontSize: FONT_SIZE.sm },
+  amtChipTextActive:{ color: '#fff' },
+  sectionLabel: { color: COLORS.textMuted, fontSize: FONT_SIZE.xs, fontWeight: FONT_WEIGHT.bold, letterSpacing: 0.5, marginTop: SPACING.sm, marginBottom: SPACING.xs },
+  methodRow:    { flexDirection: 'row', alignItems: 'center', gap: SPACING.md, paddingVertical: SPACING.sm + 2, borderBottomWidth: 1, borderBottomColor: COLORS.divider },
+  methodRowActive: {},
+  methodLabel:      { flex: 1, color: COLORS.textBody, fontWeight: FONT_WEIGHT.semibold, fontSize: FONT_SIZE.base },
+  methodLabelActive:{ color: COLORS.activeOrange },
+  radio:    { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: COLORS.border, alignItems: 'center', justifyContent: 'center' },
+  radioActive: { borderColor: COLORS.activeOrange },
+  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.activeOrange },
+  errMsg:   { color: COLORS.errorText, fontSize: FONT_SIZE.sm, marginTop: SPACING.xs },
+});
+
+// ── Change password modal ──────────────────────────────────────────────────
 
 function ChangePasswordModal({ visible, onClose }) {
   const [current, setCurrent] = useState('');

@@ -74,8 +74,18 @@ export function CartProvider({ children }) {
 
   function clearCart() { setCart(EMPTY_CART); }
 
+  function reorderItems(items, restaurant) {
+    const cartItems = items.map((item) => ({
+      _id: item.menuItem?._id || item._id,
+      name: item.name || item.menuItem?.name || 'Item',
+      price: item.price || item.menuItem?.price || 0,
+      quantity: item.quantity || 1,
+    }));
+    setCart({ items: cartItems, restaurantId: restaurant._id, restaurantName: restaurant.name });
+  }
+
   return (
-    <CartContext.Provider value={{ cart, cartTotal, cartCount, addToCart, removeFromCart, clearCart }}>
+    <CartContext.Provider value={{ cart, cartTotal, cartCount, addToCart, removeFromCart, clearCart, reorderItems }}>
       {children}
     </CartContext.Provider>
   );
