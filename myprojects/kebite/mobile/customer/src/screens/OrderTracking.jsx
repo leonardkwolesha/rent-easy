@@ -5,11 +5,11 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, GRADIENTS, BRAND, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW,
-         ORDER_STATUSES, STATUS_LABELS, STATUS_BADGE } from '../../../shared/theme';
-import { formatMoney, formatOrderId } from '../../../shared/formatters';
-import api from '../../../shared/api';
-import { connectSocket } from '../../../shared/socket';
-import OrderStatusBar from '../../../shared/components/OrderStatusBar';
+         ORDER_STATUSES, STATUS_LABELS, STATUS_BADGE } from 'shared/theme';
+import { formatMoney, formatOrderId } from 'shared/formatters';
+import api from 'shared/api';
+import { connectSocket } from 'shared/socket';
+import OrderStatusBar from 'shared/components/OrderStatusBar';
 import ErrorCard from '../components/ErrorCard';
 
 const TIMELINE = ['placed', 'confirmed', 'preparing', 'ready', 'on_the_way', 'delivered'];
@@ -57,6 +57,8 @@ export default function OrderTracking({ route, navigation }) {
       const s = await connectSocket();
       if (s && active) {
         socketRef.current = s;
+        // Join the order room so targeted emits reach this screen
+        s.emit('join:order', { orderId });
         s.on('order:statusUpdate', (payload) => {
           if (payload.orderId === orderId && active) {
             setOrder((prev) => prev ? { ...prev, status: payload.status } : prev);
@@ -110,7 +112,7 @@ export default function OrderTracking({ route, navigation }) {
         <View style={{ width: 24 }} />
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={{ padding: SPACING.lg, paddingBottom: 80 }}>
+      <ScrollView contentContainerStyle={{ padding: SPACING.lg, paddingBottom: 120 }}>
         {/* Status hero card */}
         {isCancelled ? (
           <View style={[styles.heroCard, styles.cancelledCard]}>
@@ -212,7 +214,12 @@ export default function OrderTracking({ route, navigation }) {
           <View style={styles.card}>
             <View style={styles.cardRow}>
               <Ionicons name="location-outline" size={16} color={COLORS.activeOrange} />
-              <Text style={[styles.cardLabel, { flex: 1 }]}>{order.deliveryAddress}</Text>
+              <Text style={[styles.cardLabel, { flex: 1 }]}>
+                {typeof order.deliveryAddress === 'string'
+                  ? order.deliveryAddress
+                  : [order.deliveryAddress.street, order.deliveryAddress.area, order.deliveryAddress.city]
+                      .filter(Boolean).join(', ')}
+              </Text>
             </View>
           </View>
         )}

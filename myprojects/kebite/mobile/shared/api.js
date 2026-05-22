@@ -29,6 +29,13 @@ export function setUnauthorizedHandler(fn) { onUnauthorized = fn; }
 api.interceptors.response.use(
   (res) => res,
   async (err) => {
+    const config = err.config;
+    // Retry once on 503 (DB not ready yet on server startup)
+    if (err.response?.status === 503 && !config._retried503) {
+      config._retried503 = true;
+      await new Promise((r) => setTimeout(r, 2500));
+      return api(config);
+    }
     if (err.response?.status === 401) {
       await clearAuthData();
       if (onUnauthorized) onUnauthorized();

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
-import { getJSON, setJSON, KEYS } from '../../../shared/storage';
+import { getJSON, setJSON, KEYS } from 'shared/storage';
 
 const EMPTY_CART = { items: [], restaurantId: null, restaurantName: '' };
 

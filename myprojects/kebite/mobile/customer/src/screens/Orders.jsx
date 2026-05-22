@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, FlatList, TouchableOpacity, ActivityIndicator,
   RefreshControl, ScrollView, StyleSheet, Alert, Modal,
@@ -9,11 +10,12 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   COLORS, GRADIENTS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW,
   STATUS_LABELS, BRAND,
-} from '../../../shared/theme';
-import { formatMoney, formatOrderId } from '../../../shared/formatters';
-import api from '../../../shared/api';
-import { connectSocket } from '../../../shared/socket';
+} from 'shared/theme';
+import { formatMoney, formatOrderId } from 'shared/formatters';
+import api from 'shared/api';
+import { connectSocket } from 'shared/socket';
 import { useCart } from '../context/CartContext';
+import { useOrderBadge } from '../navigation/AppNavigator';
 import ErrorCard from '../components/ErrorCard';
 
 const FILTERS = ['All', 'Active', 'Delivered', 'Cancelled'];
@@ -30,7 +32,8 @@ const STATUS_COLORS = {
 };
 
 export default function Orders({ navigation }) {
-  const { reorderItems } = useCart();
+  const { reorderItems }  = useCart();
+  const { setCount }      = useOrderBadge();
   const [orders, setOrders]   = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState(null);
@@ -43,33 +46,44 @@ export default function Orders({ navigation }) {
     setLoading(true); setError(null);
     try {
       const res = await api.get('/orders/my');
-      setOrders(res.data || []);
+      const data = res.data || [];
+      setOrders(data);
+      setCount(data.filter((o) => ACTIVE_STATUSES.has(o.status)).length);
     } catch (err) {
       setError(err?.response?.data?.message || 'Could not load orders.');
     } finally {
       setLoading(false); setRef(false);
     }
-  }, []);
+  }, [setCount]);
 
+  // Refresh every time this tab gains focus (handles post-checkout return)
+  useFocusEffect(
+    useCallback(() => {
+      fetchOrders();
+    }, [fetchOrders])
+  );
+
+  // Socket setup — connect once, stay alive while component is mounted
   useEffect(() => {
-    fetchOrders();
     (async () => {
       const s = await connectSocket();
       if (s) {
         socketRef.current = s;
         s.on('order:statusUpdate', (payload) => {
-          setOrders((prev) =>
-            prev.map((o) =>
+          setOrders((prev) => {
+            const updated = prev.map((o) =>
               o._id === payload.orderId ? { ...o, status: payload.status } : o
-            )
-          );
+            );
+            setCount(updated.filter((o) => ACTIVE_STATUSES.has(o.status)).length);
+            return updated;
+          });
         });
       }
     })();
     return () => {
       if (socketRef.current) socketRef.current.off('order:statusUpdate');
     };
-  }, [fetchOrders]);
+  }, [setCount]);
 
   const filtered = useMemo(() => {
     if (filter === 'All')       return orders;
@@ -190,15 +204,15 @@ export default function Orders({ navigation }) {
         {isActive && (
           <View style={styles.activeProgressRow}>
             {['placed', 'confirmed', 'preparing', 'ready', 'on_the_way'].map((s, i, arr) => {
-              const idx   = arr.indexOf(item.status);
+              const idx    = arr.indexOf(item.status);
               const filled = i <= idx;
               return (
-                <View key={s} style={{ flex: 1, alignItems: 'center' }}>
+                <Fragment key={s}>
                   <View style={[styles.progressDot, filled && styles.progressDotFilled]} />
                   {i < arr.length - 1 && (
                     <View style={[styles.progressLine, filled && i < idx && styles.progressLineFilled]} />
                   )}
-                </View>
+                </Fragment>
               );
             })}
           </View>
@@ -298,7 +312,7 @@ export default function Orders({ navigation }) {
         <FlatList
           data={filtered}
           keyExtractor={(o) => o._id}
-          contentContainerStyle={{ padding: SPACING.md, paddingBottom: 80 }}
+          contentContainerStyle={{ padding: SPACING.md, paddingBottom: 120 }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -498,11 +512,10 @@ const styles = StyleSheet.create({
   activeProgressRow: {
     flexDirection: 'row', alignItems: 'center',
     marginTop: SPACING.sm, marginBottom: SPACING.xs,
-    position: 'relative',
   },
-  progressDot:       { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.border },
+  progressDot:       { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.border, flexShrink: 0 },
   progressDotFilled: { backgroundColor: COLORS.activeOrange },
-  progressLine:      { position: 'absolute', height: 2, left: '50%', right: '-50%', top: 4, backgroundColor: COLORS.border },
+  progressLine:      { flex: 1, height: 2, backgroundColor: COLORS.border },
   progressLineFilled:{ backgroundColor: COLORS.activeOrange },
 
   itemSummary: { color: COLORS.textMuted, fontSize: FONT_SIZE.sm, marginTop: SPACING.sm, lineHeight: 18 },

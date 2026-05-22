@@ -1,0 +1,25 @@
+# OS / personal files
+*.lnk
+*.mp4
+*.jpeg
+*.jpg
+*.docx
+*.pptx
+*.document
+panda.jpeg
+mytestimage.jpg
+
+# Personal / study folders
+"This PC - Shortcut.lnk"
+t.joseph materials/
+"t.joseph materials/"
+
+# Node / build artifacts
+node_modules/
+dist/
+build/
+.expo/
+*.log
+
+# Env files (project-level .gitignore handles these too)
+.env

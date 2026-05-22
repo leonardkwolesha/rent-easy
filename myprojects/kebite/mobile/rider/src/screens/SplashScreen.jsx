@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { View, Text, Animated, TouchableOpacity, StyleSheet, StatusBar } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, GRADIENTS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT } from '../../../shared/theme';
+import { COLORS, GRADIENTS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT } from 'shared/theme';
 
 export default function SplashScreen({ navigation }) {
   const logoScale    = useRef(new Animated.Value(0.55)).current;

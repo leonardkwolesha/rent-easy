@@ -1,5 +1,5 @@
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { BRAND } from '../../../shared/theme';
+import { BRAND } from 'shared/theme';
 
 export default function ErrorCard({ message, onRetry }) {
   return (

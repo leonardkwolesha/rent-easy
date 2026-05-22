@@ -12,3 +12,4 @@ export { default as KebiteButton }    from './KebiteButton';
 export { default as RestaurantCard }  from './RestaurantCard';
 export { default as OrderStatusBar }  from './OrderStatusBar';
 export { default as PromoCodeInput }  from './PromoCodeInput';
+export { AnimatedTabIcon }            from './AnimatedTabIcon';

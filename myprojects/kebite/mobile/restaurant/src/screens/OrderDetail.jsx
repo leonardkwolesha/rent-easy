@@ -1,15 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, ActivityIndicator,
   StyleSheet, Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, GRADIENTS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../../../shared/theme';
-import { formatMoney, formatOrderId, formatPhone } from '../../../shared/formatters';
-import OrderStatusBar from '../../../shared/components/OrderStatusBar';
-import api from '../../../shared/api';
-import { getSocket } from '../../../shared/socket';
+import { COLORS, GRADIENTS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW, tabBar } from 'shared/theme';
+import { formatMoney, formatOrderId, formatPhone } from 'shared/formatters';
+import OrderStatusBar from 'shared/components/OrderStatusBar';
+import api from 'shared/api';
+import { connectSocket } from 'shared/socket';
 import ErrorCard from '../components/ErrorCard';
 
 const NEXT_STATUS = {
@@ -30,17 +31,20 @@ const NEXT_ICON = {
 
 export default function OrderDetail({ route, navigation }) {
   const { orderId }              = route.params;
+  const insets                   = useSafeAreaInsets();
   const [order, setOrder]        = useState(null);
   const [loading, setLoading]    = useState(false);
   const [error, setError]        = useState(null);
   const [updating, setUpdating]  = useState(false);
+  const socketRef                = useRef(null);
 
+  // Fetch order on mount
   useEffect(() => {
     let active = true;
     (async () => {
       setLoading(true); setError(null);
       try {
-        const res = await api.get(`/orders/${orderId}`);
+        const res = await api.get(`/restaurant/me/orders/${orderId}`);
         if (active) setOrder(res.data);
       } catch (err) {
         if (active) setError(err?.response?.data?.message || 'Could not load order.');
@@ -51,15 +55,35 @@ export default function OrderDetail({ route, navigation }) {
     return () => { active = false; };
   }, [orderId]);
 
+  // Real-time status updates — e.g. rider accepting (ready → on_the_way)
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const s = await connectSocket();
+      if (s && active) {
+        socketRef.current = s;
+        s.emit('join:order', { orderId });
+        s.on('order:statusUpdate', (payload) => {
+          if (payload.orderId === orderId && active) {
+            setOrder((prev) => prev ? { ...prev, status: payload.status } : prev);
+          }
+        });
+      }
+    })();
+    return () => {
+      active = false;
+      if (socketRef.current) socketRef.current.off('order:statusUpdate');
+    };
+  }, [orderId]);
+
   async function advance() {
     const next = NEXT_STATUS[order?.status];
     if (!next) return;
     setUpdating(true);
     try {
-      const res = await api.patch(`/orders/${orderId}/status`, { status: next });
+      const res = await api.put(`/restaurant/me/orders/${orderId}`, { status: next });
       setOrder(res.data);
-      const s = getSocket();
-      if (s?.connected) s.emit('order:statusUpdate', { orderId, status: next });
+      // Server broadcasts order:statusUpdate to all clients — no client emit needed
     } catch (err) {
       Alert.alert('Update failed', err?.response?.data?.message || 'Could not update status.');
     } finally {
@@ -77,10 +101,9 @@ export default function OrderDetail({ route, navigation }) {
           text: 'Cancel order', style: 'destructive',
           onPress: async () => {
             try {
-              const res = await api.patch(`/orders/${orderId}/status`, { status: 'cancelled' });
+              const res = await api.put(`/restaurant/me/orders/${orderId}`, { status: 'cancelled' });
               setOrder(res.data);
-              const s = getSocket();
-              if (s?.connected) s.emit('order:statusUpdate', { orderId, status: 'cancelled' });
+              // Server broadcasts order:statusUpdate — no client emit needed
             } catch (err) {
               Alert.alert('Failed', err?.response?.data?.message || 'Could not cancel.');
             }
@@ -146,14 +169,14 @@ export default function OrderDetail({ route, navigation }) {
             <View style={styles.infoIcon}>
               <Ionicons name="person-outline" size={16} color={COLORS.activeOrange} />
             </View>
-            <Text style={styles.infoText}>{order.customer?.name || '—'}</Text>
+            <Text style={styles.infoText}>{order.userId?.name || '—'}</Text>
           </View>
-          {order.customer?.phone && (
+          {order.userId?.phone && (
             <View style={styles.infoRow}>
               <View style={styles.infoIcon}>
                 <Ionicons name="call-outline" size={16} color={COLORS.activeOrange} />
               </View>
-              <Text style={styles.infoText}>{formatPhone(order.customer.phone)}</Text>
+              <Text style={styles.infoText}>{formatPhone(order.userId.phone)}</Text>
             </View>
           )}
           <View style={styles.infoRow}>
@@ -161,7 +184,10 @@ export default function OrderDetail({ route, navigation }) {
               <Ionicons name="location-outline" size={16} color={COLORS.activeOrange} />
             </View>
             <Text style={[styles.infoText, { flex: 1 }]} numberOfLines={3}>
-              {order.deliveryAddress || '—'}
+              {typeof order.deliveryAddress === 'string'
+                ? order.deliveryAddress || '—'
+                : [order.deliveryAddress?.street, order.deliveryAddress?.area, order.deliveryAddress?.city]
+                    .filter(Boolean).join(', ') || '—'}
             </Text>
           </View>
         </View>
@@ -216,9 +242,9 @@ export default function OrderDetail({ route, navigation }) {
         )}
       </ScrollView>
 
-      {/* Action buttons */}
+      {/* Action buttons — sit above the device safe area */}
       {!isCancelled && (
-        <View style={styles.actions}>
+        <View style={[styles.actions, { bottom: Math.max(insets.bottom, SPACING.lg) }]}>
           {canAdvance && (
             <TouchableOpacity
               onPress={advance}
@@ -325,10 +351,9 @@ const styles = StyleSheet.create({
   payText: { color: COLORS.textBody, fontSize: FONT_SIZE.base },
 
   actions: {
-    position:        'absolute',
-    left:            SPACING.lg,
-    right:           SPACING.lg,
-    bottom:          SPACING.xxl,
+    position: 'absolute',
+    left:     SPACING.lg,
+    right:    SPACING.lg,
   },
   primaryBtn: {
     paddingVertical: SPACING.lg,

@@ -1,8 +1,8 @@
-import { useState, useRef } from 'react';
+﻿import { useState, useRef } from 'react';
 import { View, Text, FlatList, TouchableOpacity, Dimensions, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { BRAND } from '../../../shared/theme';
+import { BRAND } from 'shared/theme';
 
 const { width } = Dimensions.get('window');
 
@@ -12,7 +12,7 @@ const SLIDES = [
   { icon: 'bicycle-outline',    title: 'Fast local delivery',
     text:  'Live tracking from kitchen to your door — no surprises.' },
   { icon: 'wallet-outline',     title: 'Pay your way',
-    text:  'M-Pesa, Airtel Money, Tigo Pesa, or cash on delivery.' },
+    text:  'M-Pesa, Airtel Money, Mixx by Yas, or cash on delivery.' },
 ];
 
 export default function Onboarding({ navigation }) {

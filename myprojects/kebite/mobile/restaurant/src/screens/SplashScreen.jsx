@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { View, Text, Animated, TouchableOpacity, StyleSheet, StatusBar } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT } from '../../../shared/theme';
+import { COLORS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT } from 'shared/theme';
 
 // Restaurant-side splash uses the dark navy palette — signals a professional ops tool,
 // not a consumer app.

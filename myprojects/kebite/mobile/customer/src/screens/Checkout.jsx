@@ -5,10 +5,10 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, GRADIENTS, BRAND, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../../../shared/theme';
-import { formatMoney, formatPhone } from '../../../shared/formatters';
-import PromoCodeInput from '../../../shared/components/PromoCodeInput';
-import api from '../../../shared/api';
+import { COLORS, GRADIENTS, BRAND, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW } from 'shared/theme';
+import { formatMoney, formatPhone } from 'shared/formatters';
+import PromoCodeInput from 'shared/components/PromoCodeInput';
+import api from 'shared/api';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
@@ -17,7 +17,7 @@ import ErrorCard from '../components/ErrorCard';
 const PAYMENT_OPTIONS = [
   { id: 'mpesa',  label: 'M-Pesa',           icon: 'phone-portrait-outline', note: 'Recommended' },
   { id: 'airtel', label: 'Airtel Money',      icon: 'phone-portrait-outline', note: null },
-  { id: 'tigo',   label: 'Tigo Pesa',         icon: 'phone-portrait-outline', note: null },
+  { id: 'mixx',   label: 'Mixx by Yas',        icon: 'phone-portrait-outline', note: null },
   { id: 'cash',   label: 'Cash on delivery',  icon: 'cash-outline',           note: null },
 ];
 
@@ -51,8 +51,8 @@ export default function Checkout({ navigation }) {
     try {
       const payload = {
         restaurantId:    cart.restaurantId,
-        items:           cart.items.map((i) => ({ menuItemId: i._id, quantity: i.quantity })),
-        deliveryAddress: address.trim(),
+        items:           cart.items.map((i) => ({ name: i.name, price: i.price, quantity: i.quantity })),
+        deliveryAddress: { street: address.trim(), city: 'Dar es Salaam' },
         paymentMethod:   payment,
         total:           grandTotal,
         promoCode:       promo?.code,

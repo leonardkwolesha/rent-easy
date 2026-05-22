@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import api, { setUnauthorizedHandler } from '../../../shared/api';
-import { getToken, setItem, KEYS, clearAuthData } from '../../../shared/storage';
+import api, { setUnauthorizedHandler } from 'shared/api';
+import { getToken, setItem, KEYS, clearAuthData } from 'shared/storage';
 
 const AuthContext = createContext(null);
 

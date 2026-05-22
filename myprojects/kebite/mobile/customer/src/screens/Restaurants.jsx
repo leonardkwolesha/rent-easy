@@ -3,8 +3,8 @@ import { View, Text, FlatList, TouchableOpacity, Image, ActivityIndicator,
          ScrollView, TextInput, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { BRAND } from '../../../shared/theme';
-import api from '../../../shared/api';
+import { BRAND } from 'shared/theme';
+import api from 'shared/api';
 import ErrorCard from '../components/ErrorCard';
 
 const DEFAULT_CATS = ['All', 'Biryani', 'Burgers', 'Pizza', 'Chicken', 'Local', 'Drinks'];
@@ -99,7 +99,7 @@ export default function Restaurants({ navigation }) {
         <FlatList
           data={filtered}
           keyExtractor={(r) => r._id}
-          contentContainerStyle={{ padding: 16, paddingBottom: 80 }}
+          contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
           renderItem={({ item }) => (
             <TouchableOpacity
               onPress={() => navigation.navigate('RestaurantDetail', { id: item._id })}

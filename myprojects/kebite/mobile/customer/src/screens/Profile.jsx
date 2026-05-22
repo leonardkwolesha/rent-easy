@@ -1,19 +1,20 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
-  Alert, Switch, Modal, KeyboardAvoidingView, Platform, ActivityIndicator,
+  Alert, Switch, Modal, KeyboardAvoidingView, Platform, ActivityIndicator, Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import api from '../../../shared/api';
-import { formatPhone, formatMoney } from '../../../shared/formatters';
-import { disconnectSocket } from '../../../shared/socket';
+import * as ImagePicker from 'expo-image-picker';
+import api from 'shared/api';
+import { formatPhone, formatMoney } from 'shared/formatters';
+import { disconnectSocket } from 'shared/socket';
 import { useAuth } from '../context/AuthContext';
 import {
   COLORS, SPACING, RADIUS, FONT_SIZE, FONT_WEIGHT, SHADOW,
-} from '../../../shared/theme';
+} from 'shared/theme';
 import {
   GradientHeader, Avatar, Badge, StatCard,
-} from '../../../shared/components';
+} from 'shared/components';
 
 function memberSince(date) {
   if (!date) return '—';
@@ -47,9 +48,74 @@ export default function Profile({ navigation }) {
   const [draft,   setDraft]   = useState('');
   const [saving,  setSaving]  = useState(false);
 
+  // Avatar
+  const [avatarSheet,   setAvatarSheet]   = useState(false);
+  const [avatarLoading, setAvatarLoading] = useState(false);
+
   // Password modal
-  const [pwOpen,     setPwOpen]     = useState(false);
-  const [topUpOpen,  setTopUpOpen]  = useState(false);
+  const [pwOpen,      setPwOpen]     = useState(false);
+  const [topUpOpen,   setTopUpOpen]  = useState(false);
+  const [logoutBusy,  setLogoutBusy] = useState(false);
+
+  async function launchPicker(mode) {
+    if (mode === 'camera') {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Allow camera access to take a photo.');
+        return;
+      }
+    } else {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Allow photo library access to pick an image.');
+        return;
+      }
+    }
+
+    const opts = { mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.8 };
+
+    const result = mode === 'camera'
+      ? await ImagePicker.launchCameraAsync(opts)
+      : await ImagePicker.launchImageLibraryAsync(opts);
+
+    if (!result.canceled && result.assets?.[0]) {
+      uploadAvatar(result.assets[0]);
+    }
+  }
+
+  async function uploadAvatar(asset) {
+    setAvatarLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append('avatar', {
+        uri:  asset.uri,
+        type: asset.mimeType || 'image/jpeg',
+        name: 'avatar.jpg',
+      });
+      // transformRequest bypasses axios JSON serialisation so FormData passes through raw
+      const { data } = await api.post('/users/me/avatar', formData, {
+        headers:          { 'Content-Type': 'multipart/form-data' },
+        transformRequest: [(d) => d],
+      });
+      setUser((u) => (u ? { ...u, avatar: data.avatar } : u));
+    } catch (err) {
+      Alert.alert('Upload failed', err.response?.data?.message || 'Could not update photo. Try again.');
+    } finally {
+      setAvatarLoading(false);
+    }
+  }
+
+  async function deleteAvatar() {
+    setAvatarLoading(true);
+    try {
+      await api.delete('/users/me/avatar');
+      setUser((u) => (u ? { ...u, avatar: null } : u));
+    } catch (err) {
+      Alert.alert('Remove failed', err.response?.data?.message || 'Could not remove photo.');
+    } finally {
+      setAvatarLoading(false);
+    }
+  }
 
   function startEdit(field) {
     setEditing(field);
@@ -96,17 +162,21 @@ export default function Profile({ navigation }) {
     }
   }
 
-  function confirmLogout() {
-    Alert.alert('Sign out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign out', style: 'destructive',
-        onPress: async () => {
-          try { disconnectSocket(); } catch {}
-          try { await logout(); } catch {}
-        },
-      },
-    ]);
+  async function confirmLogout() {
+    if (logoutBusy) return;
+    const proceed = Platform.OS === 'web'
+      ? window.confirm('Are you sure you want to sign out?')
+      : await new Promise((resolve) => {
+          Alert.alert('Sign out', 'Are you sure you want to sign out?', [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Sign out', style: 'destructive', onPress: () => resolve(true) },
+          ]);
+        });
+    if (!proceed) return;
+    setLogoutBusy(true);
+    try { disconnectSocket(); } catch {}
+    try { await logout(); } catch {}
+    setLogoutBusy(false);
   }
 
   const orderCount = user?.orderCount ?? 0;
@@ -114,20 +184,41 @@ export default function Profile({ navigation }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.pageBg }}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 96 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
 
         {/* ── Gradient header ────────────────────────────────────────── */}
         <GradientHeader
           title="My Profile"
           topInset={48}
           right={
-            <TouchableOpacity onPress={confirmLogout} hitSlop={8} accessibilityLabel="Sign out">
-              <Ionicons name="log-out-outline" size={22} color={COLORS.white} />
+            <TouchableOpacity
+              onPress={confirmLogout}
+              disabled={logoutBusy}
+              hitSlop={8}
+              accessibilityLabel="Sign out"
+            >
+              {logoutBusy
+                ? <ActivityIndicator size="small" color={COLORS.white} />
+                : <Ionicons name="log-out-outline" size={22} color={COLORS.white} />
+              }
             </TouchableOpacity>
           }
         >
           <View style={styles.heroRow}>
-            <Avatar name={user?.name} uri={user?.avatar} size={84} variant="glass" />
+            <TouchableOpacity
+              onPress={() => setAvatarSheet(true)}
+              activeOpacity={0.85}
+              style={styles.avatarWrap}
+              accessibilityLabel="Change profile photo"
+              disabled={avatarLoading}
+            >
+              <Avatar name={user?.name} uri={user?.avatar} size={84} variant="glass" />
+              <View style={styles.cameraBadge}>
+                {avatarLoading
+                  ? <ActivityIndicator size="small" color={COLORS.white} />
+                  : <Ionicons name="camera" size={14} color={COLORS.white} />}
+              </View>
+            </TouchableOpacity>
             <Text style={styles.heroName}>{user?.name || 'Guest'}</Text>
             <Text style={styles.heroEmail}>{user?.email || ''}</Text>
             <Badge
@@ -258,16 +349,15 @@ export default function Profile({ navigation }) {
             />
             <Divider />
             <LinkRow
-              icon="pricetag-outline"
-              label="My Promo Codes"
-              hint="Coming soon"
-              disabled
+              icon="help-circle-outline"
+              label="Help & Support"
+              onPress={() => Linking.openURL('mailto:support@kebite.co.tz')}
             />
             <Divider />
             <LinkRow
-              icon="help-circle-outline"
-              label="Help & Support"
-              onPress={() => Alert.alert('Help', 'Reach us at support@kebite.co.tz')}
+              icon="shield-checkmark-outline"
+              label="Privacy Policy"
+              onPress={() => Linking.openURL('https://kebite.co.tz/privacy')}
               last
             />
           </View>
@@ -275,15 +365,34 @@ export default function Profile({ navigation }) {
 
         {/* ── Sign out ──────────────────────────────────────────────── */}
         <View style={{ paddingHorizontal: SPACING.lg, marginTop: SPACING.xl }}>
-          <TouchableOpacity onPress={confirmLogout} style={styles.signOut} accessibilityLabel="Sign out">
-            <Ionicons name="log-out-outline" size={20} color={COLORS.errorText} />
-            <Text style={styles.signOutText}>Sign Out</Text>
+          <TouchableOpacity
+            onPress={confirmLogout}
+            disabled={logoutBusy}
+            style={[styles.signOut, logoutBusy && { opacity: 0.6 }]}
+            accessibilityLabel="Sign out"
+          >
+            {logoutBusy ? (
+              <ActivityIndicator size="small" color={COLORS.errorText} />
+            ) : (
+              <>
+                <Ionicons name="log-out-outline" size={20} color={COLORS.errorText} />
+                <Text style={styles.signOutText}>Sign Out</Text>
+              </>
+            )}
           </TouchableOpacity>
         </View>
 
         <Text style={styles.footer}>Kebite v1.0 · Tanzania TZ</Text>
       </ScrollView>
 
+      <AvatarSheet
+        visible={avatarSheet}
+        hasAvatar={!!user?.avatar}
+        onClose={() => setAvatarSheet(false)}
+        onTakePhoto={() => { setAvatarSheet(false); setTimeout(() => launchPicker('camera'),  600); }}
+        onChooseLibrary={() => { setAvatarSheet(false); setTimeout(() => launchPicker('library'), 600); }}
+        onRemove={() => { setAvatarSheet(false); setTimeout(() => deleteAvatar(), 150); }}
+      />
       <ChangePasswordModal visible={pwOpen} onClose={() => setPwOpen(false)} />
       <TopUpModal
         visible={topUpOpen}
@@ -419,13 +528,91 @@ function LangBtn({ label, active, onPress }) {
 
 function Divider() { return <View style={styles.divider} />; }
 
+// ── Avatar picker sheet ────────────────────────────────────────────────────
+
+function AvatarSheet({ visible, hasAvatar, onClose, onTakePhoto, onChooseLibrary, onRemove }) {
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={avs.overlay}>
+        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
+        <View style={avs.sheet}>
+          <View style={avs.handle} />
+          <Text style={avs.title}>Profile Photo</Text>
+
+          <TouchableOpacity onPress={onTakePhoto} style={avs.option} activeOpacity={0.7}>
+            <View style={avs.optionIcon}>
+              <Ionicons name="camera-outline" size={22} color={COLORS.activeOrange} />
+            </View>
+            <Text style={avs.optionText}>Take Photo</Text>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.textLight} />
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={onChooseLibrary} style={avs.option} activeOpacity={0.7}>
+            <View style={avs.optionIcon}>
+              <Ionicons name="image-outline" size={22} color={COLORS.activeOrange} />
+            </View>
+            <Text style={avs.optionText}>Choose from Library</Text>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.textLight} />
+          </TouchableOpacity>
+
+          {hasAvatar && (
+            <TouchableOpacity onPress={onRemove} style={avs.option} activeOpacity={0.7}>
+              <View style={[avs.optionIcon, { backgroundColor: COLORS.errorBg }]}>
+                <Ionicons name="trash-outline" size={22} color={COLORS.errorText} />
+              </View>
+              <Text style={[avs.optionText, { color: COLORS.errorText }]}>Remove Photo</Text>
+              <Ionicons name="chevron-forward" size={18} color={COLORS.textLight} />
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity onPress={onClose} style={avs.cancel} activeOpacity={0.7}>
+            <Text style={avs.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const avs = StyleSheet.create({
+  overlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor:      COLORS.cardBg,
+    borderTopLeftRadius:  RADIUS.xl,
+    borderTopRightRadius: RADIUS.xl,
+    padding:              SPACING.xl,
+    paddingBottom:        SPACING.xxxl,
+  },
+  handle:   { width: 40, height: 4, borderRadius: 2, backgroundColor: COLORS.border, alignSelf: 'center', marginBottom: SPACING.lg },
+  title:    { fontSize: FONT_SIZE.lg, fontWeight: FONT_WEIGHT.bold, color: COLORS.dark, marginBottom: SPACING.md },
+  option: {
+    flexDirection: 'row', alignItems: 'center', gap: SPACING.md,
+    paddingVertical: SPACING.md + 2,
+    borderBottomWidth: 1, borderBottomColor: COLORS.divider,
+  },
+  optionIcon: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(232,82,26,0.1)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  optionText: { flex: 1, fontSize: FONT_SIZE.base, fontWeight: FONT_WEIGHT.semibold, color: COLORS.textBody },
+  cancel: {
+    marginTop: SPACING.md,
+    paddingVertical: SPACING.md + 2,
+    borderRadius: RADIUS.pill,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+  },
+  cancelText: { fontSize: FONT_SIZE.base, fontWeight: FONT_WEIGHT.bold, color: COLORS.textBody },
+});
+
 // ── Top-up modal ───────────────────────────────────────────────────────────
 
 const QUICK_AMOUNTS = [5000, 10000, 20000, 50000];
 const PAY_METHODS   = [
   { id: 'mpesa',  label: 'M-Pesa',      icon: 'phone-portrait-outline' },
   { id: 'airtel', label: 'Airtel Money', icon: 'phone-portrait-outline' },
-  { id: 'tigo',   label: 'Tigo Pesa',   icon: 'phone-portrait-outline' },
+  { id: 'mixx',   label: 'Mixx by Yas', icon: 'phone-portrait-outline' },
 ];
 
 function TopUpModal({ visible, phone, onClose, onSuccess }) {
@@ -569,11 +756,13 @@ const topUp = StyleSheet.create({
 // ── Change password modal ──────────────────────────────────────────────────
 
 function ChangePasswordModal({ visible, onClose }) {
-  const [current, setCurrent] = useState('');
-  const [next,    setNext]    = useState('');
-  const [busy,    setBusy]    = useState(false);
+  const [current,     setCurrent]     = useState('');
+  const [next,        setNext]        = useState('');
+  const [busy,        setBusy]        = useState(false);
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNext,    setShowNext]    = useState(false);
 
-  function reset() { setCurrent(''); setNext(''); }
+  function reset() { setCurrent(''); setNext(''); setShowCurrent(false); setShowNext(false); }
   function close() { reset(); onClose?.(); }
 
   async function submit() {
@@ -594,24 +783,55 @@ function ChangePasswordModal({ visible, onClose }) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={close}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.modalBackdrop}
       >
         <View style={styles.modalCard}>
           <Text style={styles.modalTitle}>Change password</Text>
           <Text style={styles.modalHint}>Enter your current password and a new one (min 6 characters).</Text>
-          <TextInput
-            value={current} onChangeText={setCurrent}
-            placeholder="Current password" placeholderTextColor={COLORS.textLight}
-            secureTextEntry editable={!busy}
-            style={styles.modalInput}
-          />
-          <TextInput
-            value={next} onChangeText={setNext}
-            placeholder="New password" placeholderTextColor={COLORS.textLight}
-            secureTextEntry editable={!busy}
-            style={styles.modalInput}
-          />
+
+          {/* Current password */}
+          <View style={styles.pwFieldWrap}>
+            <TextInput
+              value={current} onChangeText={setCurrent}
+              placeholder="Current password" placeholderTextColor={COLORS.textLight}
+              secureTextEntry={!showCurrent} editable={!busy}
+              style={styles.pwInput}
+            />
+            <TouchableOpacity
+              onPress={() => setShowCurrent((v) => !v)}
+              style={styles.eyeBtn}
+              accessibilityLabel={showCurrent ? 'Hide password' : 'Show password'}
+            >
+              <Ionicons
+                name={showCurrent ? 'eye-off-outline' : 'eye-outline'}
+                size={20}
+                color={COLORS.textMuted}
+              />
+            </TouchableOpacity>
+          </View>
+
+          {/* New password */}
+          <View style={styles.pwFieldWrap}>
+            <TextInput
+              value={next} onChangeText={setNext}
+              placeholder="New password" placeholderTextColor={COLORS.textLight}
+              secureTextEntry={!showNext} editable={!busy}
+              style={styles.pwInput}
+            />
+            <TouchableOpacity
+              onPress={() => setShowNext((v) => !v)}
+              style={styles.eyeBtn}
+              accessibilityLabel={showNext ? 'Hide password' : 'Show password'}
+            >
+              <Ionicons
+                name={showNext ? 'eye-off-outline' : 'eye-outline'}
+                size={20}
+                color={COLORS.textMuted}
+              />
+            </TouchableOpacity>
+          </View>
+
           <View style={{ flexDirection: 'row', gap: SPACING.sm, marginTop: SPACING.md }}>
             <TouchableOpacity onPress={close} disabled={busy} style={[styles.modalBtn, styles.modalBtnCancel]}>
               <Text style={styles.modalBtnCancelText}>Cancel</Text>
@@ -634,6 +854,20 @@ const styles = StyleSheet.create({
   heroRow: {
     alignItems: 'center',
     paddingTop: SPACING.lg,
+  },
+  avatarWrap: { position: 'relative' },
+  cameraBadge: {
+    position:        'absolute',
+    bottom:          0,
+    right:           0,
+    width:           28,
+    height:          28,
+    borderRadius:    14,
+    backgroundColor: COLORS.activeOrange,
+    alignItems:      'center',
+    justifyContent:  'center',
+    borderWidth:     2,
+    borderColor:     COLORS.white,
   },
   heroName:  { color: COLORS.white, fontSize: FONT_SIZE.xxl, fontWeight: FONT_WEIGHT.bold, marginTop: SPACING.md },
   heroEmail: { color: 'rgba(255,255,255,0.9)', fontSize: FONT_SIZE.base, marginTop: 2 },
@@ -752,6 +986,29 @@ const styles = StyleSheet.create({
     color: COLORS.dark,
     marginTop: SPACING.sm,
   },
+  pwFieldWrap: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    borderWidth:    1,
+    borderColor:    COLORS.border,
+    borderRadius:   RADIUS.md,
+    marginTop:      SPACING.sm,
+    backgroundColor: COLORS.cardBg,
+  },
+  pwInput: {
+    flex:             1,
+    paddingHorizontal: SPACING.md,
+    paddingVertical:  SPACING.md,
+    fontSize:         FONT_SIZE.base,
+    color:            COLORS.dark,
+  },
+  eyeBtn: {
+    paddingHorizontal: SPACING.md,
+    paddingVertical:   SPACING.md,
+    justifyContent:    'center',
+    alignItems:        'center',
+  },
+
   modalBtn: {
     flex: 1,
     paddingVertical: SPACING.md + 2,

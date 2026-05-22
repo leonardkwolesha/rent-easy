@@ -1,18 +1,22 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, Switch,
-  ActivityIndicator, RefreshControl, StyleSheet, Alert,
+  View, Text, ScrollView, TouchableOpacity, Switch, Animated,
+  ActivityIndicator, RefreshControl, StyleSheet, Alert, Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, GRADIENTS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../../../shared/theme';
-import { formatMoney, formatOrderId } from '../../../shared/formatters';
-import api from '../../../shared/api';
-import { connectSocket, getSocket } from '../../../shared/socket';
-import { setItem, KEYS } from '../../../shared/storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
+import { COLORS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW } from 'shared/theme';
+import { formatMoney, formatOrderId } from 'shared/formatters';
+import api from 'shared/api';
+import { connectSocket } from 'shared/socket';
+import { setItem, KEYS } from 'shared/storage';
 import { useAuth } from '../context/AuthContext';
 import ErrorCard from '../components/ErrorCard';
 
+const NAVY  = '#1a1a2e';
+const NAVY2 = '#16213e';
 const ACTIVE = new Set(['placed', 'confirmed', 'preparing', 'ready', 'on_the_way']);
 
 function timeAgo(iso) {
@@ -22,102 +26,237 @@ function timeAgo(iso) {
   return `${mins} min ago`;
 }
 
-export default function Dashboard({ navigation }) {
-  const { user }              = useAuth();
-  const [orders, setOrders]   = useState([]);
-  const [stats, setStats]     = useState({ ordersToday: 0, revenue: 0, avgPrep: 0 });
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState(null);
-  const [refreshing, setRef]  = useState(false);
-  const [open, setOpen]       = useState(true);
-  const [now, setNow]         = useState(Date.now());
-  const socketRef = useRef(null);
+function formatAddr(addr) {
+  if (!addr) return '';
+  if (typeof addr === 'string') return addr;
+  return [addr.label, addr.street, addr.area, addr.city].filter(Boolean).join(', ');
+}
 
-  // Live clock so "X min ago" labels update without a refetch
+// ── Skeleton ─────────────────────────────────────────────────────────────────
+function SkeletonStats() {
+  const op = useRef(new Animated.Value(0.4)).current;
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 30000);
-    return () => clearInterval(id);
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(op, { toValue: 1,   duration: 700, useNativeDriver: true }),
+        Animated.timing(op, { toValue: 0.4, duration: 700, useNativeDriver: true }),
+      ])
+    ).start();
+  }, [op]);
+  const box = (w) => ({ width: w, height: 16, borderRadius: 6, backgroundColor: COLORS.border });
+  return (
+    <Animated.View style={[styles.statsCard, { opacity: op }]}>
+      {[1, 2, 3, 4].map((k, i) => (
+        <View key={k} style={[styles.statCell, i < 3 && styles.statCellBorder, { gap: 8 }]}>
+          <View style={box('50%')} />
+          <View style={box('75%')} />
+        </View>
+      ))}
+    </Animated.View>
+  );
+}
+
+// ── Incoming banner ──────────────────────────────────────────────────────────
+function IncomingBanner({ order, onAccept, onDecline, accepting }) {
+  const insets  = useSafeAreaInsets();
+  const slideY  = useRef(new Animated.Value(-140)).current;
+
+  useEffect(() => {
+    Animated.spring(slideY, { toValue: 0, tension: 80, friction: 10, useNativeDriver: true }).start();
+  }, [slideY]);
+
+  return (
+    <Animated.View style={[styles.banner, { paddingTop: insets.top + 8, transform: [{ translateY: slideY }] }]}>
+      <View style={styles.bannerLeft}>
+        <Ionicons name="notifications" size={20} color="#fff" />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.bannerTitle}>New order #{formatOrderId(order._id)}</Text>
+          <Text style={styles.bannerSub} numberOfLines={1}>
+            {order.userId?.name || 'Customer'} · {formatMoney(order.total)}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.bannerActions}>
+        <TouchableOpacity onPress={onDecline} style={styles.bannerDecline}>
+          <Text style={styles.bannerDeclineText}>Decline</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={onAccept} disabled={accepting} style={styles.bannerAccept}>
+          {accepting
+            ? <ActivityIndicator size="small" color={NAVY} />
+            : <Text style={styles.bannerAcceptText}>Accept</Text>
+          }
+        </TouchableOpacity>
+      </View>
+    </Animated.View>
+  );
+}
+
+export default function Dashboard({ navigation }) {
+  const { user }   = useAuth();
+  const insets     = useSafeAreaInsets();
+
+  const [orders,     setOrders]     = useState([]);
+  const [analytics,  setAnalytics]  = useState(null);
+  const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState(null);
+  const [refreshing, setRefresh]    = useState(false);
+  const [isOpen,     setIsOpen]     = useState(true);
+  const [openBusy,   setOpenBusy]   = useState(false);
+  const [actionBusy, setActionBusy] = useState({});
+  const [bannerOrder,setBanner]     = useState(null);
+  const knownIds  = useRef(new Set());
+  const socketRef = useRef(null);
+  const clockId   = useRef(null);
+  const [, tick]  = useState(0);
+
+  useEffect(() => {
+    clockId.current = setInterval(() => tick((n) => n + 1), 30000);
+    return () => clearInterval(clockId.current);
   }, []);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true); setError(null);
+  const fetchAll = useCallback(async (silent = false) => {
+    if (!silent) { setLoading(true); setError(null); }
     try {
-      const [ordersRes, statsRes] = await Promise.all([
-        api.get('/orders/restaurant'),
-        api.get('/restaurants/me/today-stats').catch(() => ({ data: null })),
+      const [ordRes, anaRes] = await Promise.all([
+        api.get('/restaurant/me/orders'),
+        api.get('/restaurant/me/analytics').catch(() => ({ data: null })),
       ]);
-      const list = ordersRes.data || [];
+      const list = ordRes.data || [];
       setOrders(list);
+
       const activeCount = list.filter((o) => ACTIVE.has(o.status)).length;
       await setItem(KEYS.activeOrderCount, String(activeCount));
-      if (statsRes.data) setStats(statsRes.data);
+
+      const placed   = list.filter((o) => o.status === 'placed');
+      const newOrder = placed.find((o) => !knownIds.current.has(o._id));
+      if (newOrder) {
+        setBanner(newOrder);
+        try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); } catch {}
+      }
+      placed.forEach((o) => knownIds.current.add(o._id));
+
+      if (anaRes.data) setAnalytics(anaRes.data);
+
+      api.get('/restaurant/me')
+        .then((r) => setIsOpen(r.data?.isOpen ?? true))
+        .catch(() => {});
     } catch (err) {
-      setError(err?.response?.data?.message || 'Could not load orders.');
+      console.error('[Dashboard] fetch error:', err?.response?.data ?? err.message);
+      if (!silent) setError(err?.response?.data?.message || 'Could not load orders.');
     } finally {
-      setLoading(false); setRef(false);
+      setLoading(false); setRefresh(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchData();
+    fetchAll();
     (async () => {
       const s = await connectSocket();
       socketRef.current = s;
-      if (s) s.on('order:statusUpdate', fetchData);
+      if (s) {
+        s.emit('join', { userId: user?._id, role: 'restaurant' });
+        s.on('order:statusUpdate', () => fetchAll(true));
+      }
     })();
     return () => {
-      if (socketRef.current) socketRef.current.off('order:statusUpdate', fetchData);
+      if (socketRef.current) socketRef.current.off('order:statusUpdate');
     };
-  }, [fetchData]);
+  }, [fetchAll]);
 
-  async function updateStatus(orderId, status) {
+  async function toggleOpen(val) {
+    setOpenBusy(true);
+    const prev = isOpen;
+    setIsOpen(val);
     try {
-      const res = await api.patch(`/orders/${orderId}/status`, { status });
-      setOrders((prev) => prev.map((o) => o._id === orderId ? res.data : o));
-      const s = getSocket();
-      if (s?.connected) s.emit('order:statusUpdate', { orderId, status });
-    } catch (err) {
-      Alert.alert('Failed', err?.response?.data?.message || 'Could not update status.');
+      await api.put('/restaurant/me', { isOpen: val });
+    } catch {
+      setIsOpen(prev);
+    } finally {
+      setOpenBusy(false);
     }
   }
 
-  async function toggleOpen(val) {
-    setOpen(val);
+  async function updateStatus(orderId, status, reason) {
+    setActionBusy((b) => ({ ...b, [orderId]: true }));
     try {
-      await api.patch('/restaurants/me/status', { isOpen: val });
-    } catch {
-      setOpen(!val);
+      const body = { status };
+      if (reason) body.reason = reason;
+      const res = await api.put(`/restaurant/me/orders/${orderId}`, body);
+      setOrders((prev) => prev.map((o) => o._id === orderId ? res.data : o));
+      if (bannerOrder?._id === orderId) setBanner(null);
+    } catch (err) {
+      Alert.alert('Failed', err?.response?.data?.message || 'Could not update status.');
+    } finally {
+      setActionBusy((b) => ({ ...b, [orderId]: false }));
     }
+  }
+
+  function promptDecline(orderId) {
+    Alert.alert('Reason for declining', 'Let the customer know why.', [
+      { text: 'Out of stock',  onPress: () => updateStatus(orderId, 'cancelled', 'Out of stock') },
+      { text: 'Too busy',      onPress: () => updateStatus(orderId, 'cancelled', 'Too busy') },
+      { text: 'Closing soon',  onPress: () => updateStatus(orderId, 'cancelled', 'Closing soon') },
+      { text: 'Cancel',        style: 'cancel' },
+    ]);
   }
 
   const incoming  = orders.filter((o) => o.status === 'placed');
   const preparing = orders.filter((o) => ['confirmed', 'preparing'].includes(o.status));
   const ready     = orders.filter((o) => o.status === 'ready');
+  const inTransit = orders.filter((o) => o.status === 'on_the_way');
 
-  const totalRevenue = stats.revenue || orders.reduce((s, o) => s + (o.total || 0), 0);
+  // Safe-area-aware header height for loading skeleton
+  const headerPaddingTop = insets.top + 14;
 
   if (loading && orders.length === 0) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.pageBg }}>
-        <ActivityIndicator color={COLORS.orange} size="large" />
+      <View style={{ flex: 1, backgroundColor: COLORS.pageBg }}>
+        <LinearGradient colors={[NAVY, NAVY2]} style={[styles.header, { paddingTop: headerPaddingTop }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.title}>Dashboard</Text>
+            <Text style={styles.subtitle}>{user?.restaurantName || user?.name || 'Restaurant'}</Text>
+          </View>
+        </LinearGradient>
+        <View style={{ padding: SPACING.lg, marginTop: SPACING.md }}>
+          <SkeletonStats />
+        </View>
       </View>
     );
   }
-  if (error) return <ErrorCard message={error} onRetry={fetchData} />;
+  if (error) return <ErrorCard message={error} onRetry={fetchAll} />;
 
   return (
-    <View style={{ flex: 1, backgroundColor: COLORS.pageBg }}>
-      {/* Header */}
-      <LinearGradient colors={GRADIENTS.primary} style={styles.header}>
+    <View style={{ flex: 1, backgroundColor: '#f5f5f5' }}>
+      {/* New-order banner overlays everything */}
+      {bannerOrder && (
+        <IncomingBanner
+          order={bannerOrder}
+          accepting={!!actionBusy[bannerOrder._id]}
+          onAccept={() => updateStatus(bannerOrder._id, 'confirmed')}
+          onDecline={() => { setBanner(null); promptDecline(bannerOrder._id); }}
+        />
+      )}
+
+      {/* ── Header ── */}
+      <LinearGradient colors={[NAVY, NAVY2]} style={[styles.header, { paddingTop: headerPaddingTop }]}>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Dashboard</Text>
           <Text style={styles.subtitle}>{user?.restaurantName || user?.name || 'Restaurant'}</Text>
         </View>
+
+        {/* Open / Closed toggle */}
         <View style={styles.toggleWrap}>
-          <Text style={styles.toggleLabel}>{open ? 'Open' : 'Closed'}</Text>
+          {openBusy ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Text style={[styles.toggleLabel, { color: isOpen ? '#2ecc71' : '#e63946' }]}>
+              {isOpen ? 'Open' : 'Closed'}
+            </Text>
+          )}
           <Switch
-            value={open}
+            value={isOpen}
             onValueChange={toggleOpen}
+            disabled={openBusy}
             thumbColor="#fff"
             trackColor={{ false: 'rgba(255,255,255,0.2)', true: '#16a34a' }}
             accessibilityLabel="Toggle restaurant open or closed"
@@ -126,99 +265,96 @@ export default function Dashboard({ navigation }) {
       </LinearGradient>
 
       <ScrollView
-        contentContainerStyle={{ paddingBottom: 80 }}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ flexGrow: 1, paddingBottom: 120 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => { setRef(true); fetchData(); }}
+            onRefresh={() => { setRefresh(true); fetchAll(); }}
             tintColor={COLORS.orange}
+            colors={[COLORS.orange]}
           />
         }
         showsVerticalScrollIndicator={false}
       >
-        {/* Stats card — floats up over header */}
+        {/* ── Metric cards ── */}
         <View style={styles.statsCard}>
-          <View style={styles.statCell}>
-            <Ionicons name="receipt-outline" size={18} color={COLORS.activeOrange} />
-            <Text style={styles.statValue}>{stats.ordersToday || orders.length}</Text>
-            <Text style={styles.statLabel}>Orders today</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statCell}>
-            <Ionicons name="cash-outline" size={18} color={COLORS.activeOrange} />
-            <Text style={styles.statValue} numberOfLines={1}>{formatMoney(totalRevenue)}</Text>
-            <Text style={styles.statLabel}>Revenue</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statCell}>
-            <Ionicons name="time-outline" size={18} color={COLORS.activeOrange} />
-            <Text style={styles.statValue}>{stats.avgPrep || 18} min</Text>
-            <Text style={styles.statLabel}>Avg prep</Text>
-          </View>
+          <StatCell icon="receipt-outline" label="Orders today"  value={analytics?.todayOrders ?? orders.length}                                  color="#ff6b00" />
+          <StatCell icon="cash-outline"    label="Revenue today" value={formatMoney(analytics?.todayRevenue ?? 0)}                                 color="#ff6b00" />
+          <StatCell icon="time-outline"    label="Pending"       value={incoming.length}                                                            color="#f39c12" />
+          <StatCell icon="star-outline"    label="Rating"        value={analytics?.avgRating ? analytics.avgRating.toFixed(1) : '—'} isLast         color="#ff6b00" />
         </View>
 
-        {/* Incoming orders */}
-        <View style={styles.sectionHead}>
-          <View style={styles.sectionLeft}>
-            {incoming.length > 0 && <View style={styles.urgentDot} />}
-            <Text style={styles.sectionTitle}>Incoming</Text>
-            <View style={[styles.countBadge, incoming.length > 0 && styles.countBadgeUrgent]}>
-              <Text style={[styles.countText, incoming.length > 0 && styles.countTextUrgent]}>
-                {incoming.length}
+        {/* ── Top-selling item ── */}
+        {analytics?.popularItems?.[0] && (() => {
+          const p       = analytics.popularItems[0];
+          const raw     = p?.name || p?.menuItem?.name || '';
+          const itemName= typeof raw === 'string' && raw.trim() && raw.trim() !== 'undefined'
+            ? raw.trim() : null;
+          const itemCount = p?.orders ?? p?.count ?? p?.totalOrders ?? 0;
+          if (!itemName || !itemCount) return null;
+          return (
+            <View style={styles.topItem}>
+              <Ionicons name="trophy-outline" size={15} color={COLORS.orange} />
+              <Text style={styles.topItemText}>
+                Top today:{' '}
+                <Text style={{ fontWeight: FONT_WEIGHT.bold, color: COLORS.dark }}>{itemName}</Text>
+                {' '}· {itemCount} order{itemCount !== 1 ? 's' : ''}
               </Text>
             </View>
-          </View>
-        </View>
+          );
+        })()}
 
+        {/* ── Incoming ── */}
+        <SectionHead label="Incoming" count={incoming.length} type="incoming" />
         {incoming.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Ionicons name="checkmark-circle-outline" size={28} color={COLORS.successText} />
-            <Text style={styles.emptyText}>No new orders right now.</Text>
-          </View>
+          <EmptyState icon="notifications-outline" text="No new orders right now" />
         ) : (
           incoming.map((order) => (
             <View key={order._id} style={[styles.orderCard, styles.incomingCard]}>
               <TouchableOpacity
                 onPress={() => navigation.navigate('OrderDetail', { orderId: order._id })}
-                accessibilityLabel={`Open order ${formatOrderId(order._id)}`}
+                accessibilityLabel={`View order ${formatOrderId(order._id)}`}
               >
                 <View style={styles.cardHead}>
                   <View>
                     <Text style={styles.orderId}>#{formatOrderId(order._id)}</Text>
                     <Text style={styles.timeAgo}>{timeAgo(order.createdAt)}</Text>
                   </View>
-                  <View style={styles.amountWrap}>
+                  <View style={{ alignItems: 'flex-end' }}>
                     <Text style={styles.amount}>{formatMoney(order.total)}</Text>
-                    <Text style={styles.itemCount}>{(order.items || []).length} items</Text>
+                    <Text style={styles.itemCount}>{(order.items || []).length} item(s)</Text>
                   </View>
                 </View>
                 <Text style={styles.customer} numberOfLines={1}>
-                  <Ionicons name="person-outline" size={13} /> {order.customer?.name || 'Customer'}
+                  {order.userId?.name || 'Customer'}
+                  {!!formatAddr(order.deliveryAddress) && (
+                    <Text style={styles.address}> · {formatAddr(order.deliveryAddress)}</Text>
+                  )}
                 </Text>
-                {order.deliveryAddress ? (
-                  <Text style={styles.address} numberOfLines={1}>
-                    <Ionicons name="location-outline" size={13} /> {order.deliveryAddress}
-                  </Text>
-                ) : null}
               </TouchableOpacity>
 
               <View style={styles.actionRow}>
                 <TouchableOpacity
-                  onPress={() => updateStatus(order._id, 'cancelled')}
-                  style={styles.declineBtn}
+                  onPress={() => promptDecline(order._id)}
+                  disabled={!!actionBusy[order._id]}
+                  style={styles.rejectBtn}
                   accessibilityLabel="Decline order"
                 >
-                  <Text style={styles.declineText}>Decline</Text>
+                  <Text style={styles.rejectText}>Reject</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => updateStatus(order._id, 'confirmed')}
+                  disabled={!!actionBusy[order._id]}
                   accessibilityLabel="Accept order"
                   activeOpacity={0.85}
-                  style={{ flex: 1, borderRadius: RADIUS.pill, overflow: 'hidden' }}
+                  style={styles.acceptBtnWrap}
                 >
-                  <LinearGradient colors={GRADIENTS.primary} style={styles.acceptBtn}>
-                    <Ionicons name="checkmark" size={16} color="#fff" />
-                    <Text style={styles.acceptText}>Accept</Text>
+                  <LinearGradient colors={[COLORS.orange, COLORS.red]} style={styles.acceptBtn}>
+                    {actionBusy[order._id]
+                      ? <ActivityIndicator color="#fff" size="small" />
+                      : <Text style={styles.acceptText}>Accept</Text>
+                    }
                   </LinearGradient>
                 </TouchableOpacity>
               </View>
@@ -226,174 +362,335 @@ export default function Dashboard({ navigation }) {
           ))
         )}
 
-        {/* Preparing */}
-        <View style={styles.sectionHead}>
-          <View style={styles.sectionLeft}>
-            <Ionicons name="flame-outline" size={16} color={COLORS.activeOrange} />
-            <Text style={styles.sectionTitle}>Preparing</Text>
-            <View style={styles.countBadge}>
-              <Text style={styles.countText}>{preparing.length}</Text>
-            </View>
-          </View>
-        </View>
-
+        {/* ── Preparing ── */}
+        <SectionHead label="In Progress" count={preparing.length} type="preparing" />
         {preparing.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyText}>Nothing on the stove.</Text>
-          </View>
+          <EmptyState icon="flame-outline" text="Nothing on the stove" />
         ) : (
-          preparing.map((order) => (
-            <View key={order._id} style={styles.orderCard}>
-              <TouchableOpacity
-                onPress={() => navigation.navigate('OrderDetail', { orderId: order._id })}
-                accessibilityLabel={`Open order ${formatOrderId(order._id)}`}
-              >
-                <View style={styles.cardHead}>
-                  <View>
-                    <Text style={styles.orderId}>#{formatOrderId(order._id)}</Text>
-                    <Text style={styles.timeAgo}>{timeAgo(order.createdAt)}</Text>
+          preparing.map((order) => {
+            // confirmed → next step is to start preparing
+            // preparing → next step is to mark ready
+            const isConfirmed  = order.status === 'confirmed';
+            const nextStatus   = isConfirmed ? 'preparing' : 'ready';
+            const btnLabel     = isConfirmed ? 'Start Preparing' : 'Mark Ready';
+            const btnIcon      = isConfirmed ? 'flame-outline' : 'bag-check-outline';
+            const btnColor     = isConfirmed ? COLORS.orange    : '#2980b9';
+            const chipBg       = isConfirmed ? 'rgba(249,115,22,0.10)' : 'rgba(245,158,11,0.12)';
+            const chipText     = isConfirmed ? COLORS.activeOrange     : '#d97706';
+            const chipLabel    = isConfirmed ? 'Accepted'              : 'Preparing';
+
+            return (
+              <View key={order._id} style={[styles.orderCard, styles.preparingCard]}>
+                <TouchableOpacity
+                  onPress={() => navigation.navigate('OrderDetail', { orderId: order._id })}
+                  accessibilityLabel={`View order ${formatOrderId(order._id)}`}
+                >
+                  <View style={styles.cardHead}>
+                    <View>
+                      <Text style={styles.orderId}>#{formatOrderId(order._id)}</Text>
+                      <Text style={styles.timeAgo}>{timeAgo(order.createdAt)}</Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                      <Text style={styles.amount}>{formatMoney(order.total)}</Text>
+                      {/* Status chip shows the current stage */}
+                      <View style={[styles.statusChip, { backgroundColor: chipBg }]}>
+                        <Text style={[styles.statusChipText, { color: chipText }]}>{chipLabel}</Text>
+                      </View>
+                    </View>
                   </View>
-                  <Text style={styles.amount}>{formatMoney(order.total)}</Text>
+                  <Text style={styles.customer} numberOfLines={1}>
+                    {order.userId?.name || 'Customer'} · {(order.items || []).length} item(s)
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => updateStatus(order._id, nextStatus)}
+                  disabled={!!actionBusy[order._id]}
+                  accessibilityLabel={btnLabel}
+                  activeOpacity={0.85}
+                  style={[styles.acceptBtnWrap, { marginTop: SPACING.md }]}
+                >
+                  <View style={[styles.markReadyBtn, { backgroundColor: btnColor }]}>
+                    {actionBusy[order._id]
+                      ? <ActivityIndicator color="#fff" size="small" />
+                      : <>
+                          <Ionicons name={btnIcon} size={16} color="#fff" />
+                          <Text style={styles.acceptText}>{btnLabel}</Text>
+                        </>
+                    }
+                  </View>
+                </TouchableOpacity>
+              </View>
+            );
+          })
+        )}
+
+        {/* ── Ready for pickup ── */}
+        <SectionHead label="Ready for pickup" count={ready.length} type="ready" />
+        {ready.length === 0 ? (
+          <EmptyState icon="bicycle-outline" text="No orders waiting for pickup" />
+        ) : (
+          ready.map((order) => (
+            <TouchableOpacity
+              key={order._id}
+              onPress={() => navigation.navigate('OrderDetail', { orderId: order._id })}
+              accessibilityLabel={`View order ${formatOrderId(order._id)}`}
+              style={[styles.orderCard, styles.readyCard]}
+              activeOpacity={0.85}
+            >
+              <View style={styles.cardHead}>
+                <View>
+                  <Text style={styles.orderId}>#{formatOrderId(order._id)}</Text>
+                  <Text style={styles.timeAgo}>{timeAgo(order.createdAt)}</Text>
                 </View>
-                <Text style={styles.customer} numberOfLines={1}>
-                  {order.customer?.name || 'Customer'} · {(order.items || []).length} items
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => updateStatus(order._id, 'ready')}
-                accessibilityLabel="Mark order as ready"
-                activeOpacity={0.85}
-                style={{ borderRadius: RADIUS.pill, overflow: 'hidden', marginTop: SPACING.md }}
-              >
-                <LinearGradient colors={GRADIENTS.primary} style={styles.acceptBtn}>
-                  <Ionicons name="bag-check-outline" size={16} color="#fff" />
-                  <Text style={styles.acceptText}>Mark Ready</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
+                <Text style={styles.amount}>{formatMoney(order.total)}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: SPACING.sm }}>
+                <PulsingDot />
+                <Text style={styles.customer}>Waiting for rider</Text>
+              </View>
+            </TouchableOpacity>
           ))
         )}
 
-        {/* Ready for pickup */}
-        {ready.length > 0 && (
-          <>
-            <View style={styles.sectionHead}>
-              <View style={styles.sectionLeft}>
-                <Ionicons name="bicycle-outline" size={16} color={COLORS.infoText} />
-                <Text style={styles.sectionTitle}>Ready for pickup</Text>
-                <View style={[styles.countBadge, { backgroundColor: COLORS.infoBg }]}>
-                  <Text style={[styles.countText, { color: COLORS.infoText }]}>{ready.length}</Text>
-                </View>
-              </View>
-            </View>
-            {ready.map((order) => (
-              <TouchableOpacity
-                key={order._id}
-                onPress={() => navigation.navigate('OrderDetail', { orderId: order._id })}
-                accessibilityLabel={`Open order ${formatOrderId(order._id)}`}
-                style={[styles.orderCard, styles.readyCard]}
-              >
-                <View style={styles.cardHead}>
+        {/* ── In Transit ── */}
+        <SectionHead label="In Transit" count={inTransit.length} type="transit" />
+        {inTransit.length === 0 ? (
+          <EmptyState icon="cube-outline" text="No orders in delivery right now" />
+        ) : (
+          inTransit.map((order) => (
+            <TouchableOpacity
+              key={order._id}
+              onPress={() => navigation.navigate('OrderDetail', { orderId: order._id })}
+              accessibilityLabel={`View order ${formatOrderId(order._id)}`}
+              style={[styles.orderCard, styles.transitCard]}
+              activeOpacity={0.85}
+            >
+              <View style={styles.cardHead}>
+                <View>
                   <Text style={styles.orderId}>#{formatOrderId(order._id)}</Text>
-                  <Text style={styles.amount}>{formatMoney(order.total)}</Text>
+                  <Text style={styles.timeAgo}>{timeAgo(order.createdAt)}</Text>
                 </View>
-                <Text style={styles.customer}>
-                  {order.customer?.name || 'Customer'} · Waiting for rider
+                <Text style={styles.amount}>{formatMoney(order.total)}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: SPACING.sm }}>
+                <Ionicons name="bicycle" size={14} color="#2980b9" />
+                <Text style={[styles.customer, { color: '#2980b9' }]}>
+                  {order.userId?.name || 'Customer'} · Rider on the way
                 </Text>
-              </TouchableOpacity>
-            ))}
-          </>
+              </View>
+            </TouchableOpacity>
+          ))
         )}
       </ScrollView>
     </View>
   );
 }
 
+// ── Pulsing dot for "Ready" cards ─────────────────────────────────────────────
+function PulsingDot() {
+  const scale = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(scale, { toValue: 1.5, duration: 600, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 1,   duration: 600, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+  return (
+    <Animated.View style={{
+      width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.orange,
+      transform: [{ scale }],
+    }} />
+  );
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+function StatCell({ icon, label, value, isLast, color }) {
+  return (
+    <View style={[styles.statCell, !isLast && styles.statCellBorder]}>
+      <Ionicons name={icon} size={20} color={color || COLORS.activeOrange} />
+      <Text style={styles.statValue} numberOfLines={1}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+const BADGE_STYLES = {
+  incoming:  { bg: '#fff3e0', text: '#ff6b00' },
+  preparing: { bg: '#fff0e6', text: '#e63946' },
+  ready:     { bg: '#e8f4fd', text: '#2980b9' },
+  transit:   { bg: '#e8f4fd', text: '#16a34a' },
+};
+
+function SectionHead({ label, count, type }) {
+  const badge = BADGE_STYLES[type] || { bg: '#f3f4f6', text: '#888' };
+  return (
+    <View style={styles.sectionHead}>
+      <Text style={styles.sectionTitle}>{label}</Text>
+      <View style={[styles.countBadge, { backgroundColor: badge.bg }]}>
+        <Text style={[styles.countText, { color: badge.text }]}>{count}</Text>
+      </View>
+    </View>
+  );
+}
+
+function EmptyState({ icon, text }) {
+  return (
+    <View style={styles.emptyCard}>
+      <Ionicons name={icon} size={28} color="#ccc" />
+      <Text style={styles.emptyText}>{text}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   header: {
-    paddingTop:        52,
-    paddingBottom:     36,
-    paddingHorizontal: SPACING.lg,
+    paddingBottom:     20,
+    paddingHorizontal: 16,
     flexDirection:     'row',
     alignItems:        'center',
   },
-  title:       { color: '#fff', fontSize: FONT_SIZE.xxl, fontWeight: FONT_WEIGHT.bold },
-  subtitle:    { color: 'rgba(255,255,255,0.82)', marginTop: 2, fontSize: FONT_SIZE.sm },
-  toggleWrap:  { alignItems: 'center', gap: SPACING.xs },
-  toggleLabel: { color: '#fff', fontSize: FONT_SIZE.xs, fontWeight: FONT_WEIGHT.semibold },
+  title:      { color: '#fff', fontSize: 22, fontWeight: '800' },
+  subtitle:   { color: 'rgba(255,255,255,0.6)', marginTop: 2, fontSize: 13 },
+  toggleWrap: { alignItems: 'center', gap: 4 },
+  toggleLabel:{ fontSize: 12, fontWeight: '600' },
+
+  banner: {
+    position:          'absolute',
+    top:               0,
+    left:              0,
+    right:             0,
+    zIndex:            99,
+    backgroundColor:   COLORS.orange,
+    paddingBottom:     SPACING.md,
+    paddingHorizontal: SPACING.lg,
+    flexDirection:     'row',
+    alignItems:        'center',
+    justifyContent:    'space-between',
+    gap:               SPACING.md,
+  },
+  bannerLeft:        { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, flex: 1 },
+  bannerTitle:       { color: '#fff', fontWeight: FONT_WEIGHT.bold, fontSize: FONT_SIZE.sm },
+  bannerSub:         { color: 'rgba(255,255,255,0.85)', fontSize: FONT_SIZE.xs },
+  bannerActions:     { flexDirection: 'row', gap: SPACING.sm },
+  bannerDecline: {
+    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
+    borderRadius: RADIUS.pill, borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)',
+  },
+  bannerDeclineText: { color: '#fff', fontSize: FONT_SIZE.xs, fontWeight: FONT_WEIGHT.semibold },
+  bannerAccept: {
+    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
+    borderRadius: RADIUS.pill, backgroundColor: '#fff',
+  },
+  bannerAcceptText: { color: COLORS.orange, fontSize: FONT_SIZE.xs, fontWeight: FONT_WEIGHT.bold },
 
   statsCard: {
-    flexDirection:   'row',
-    backgroundColor: COLORS.cardBg,
-    marginHorizontal:SPACING.lg,
-    marginTop:       -20,
-    borderRadius:    RADIUS.xl,
-    paddingVertical: SPACING.lg,
-    ...SHADOW.md,
-  },
-  statCell:    { flex: 1, alignItems: 'center', gap: SPACING.xs },
-  statDivider: { width: 1, backgroundColor: COLORS.border },
-  statValue:   { fontSize: FONT_SIZE.md, fontWeight: FONT_WEIGHT.bold, color: COLORS.dark },
-  statLabel:   { fontSize: FONT_SIZE.xs, color: COLORS.textMuted, textAlign: 'center' },
-
-  sectionHead: { paddingHorizontal: SPACING.lg, paddingTop: SPACING.xl, paddingBottom: SPACING.sm },
-  sectionLeft: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
-  sectionTitle:{ fontSize: FONT_SIZE.md, fontWeight: FONT_WEIGHT.bold, color: COLORS.dark },
-  countBadge:  { paddingHorizontal: SPACING.sm, paddingVertical: 2, borderRadius: RADIUS.pill,
-                 backgroundColor: COLORS.border },
-  countBadgeUrgent: { backgroundColor: COLORS.pendingBg },
-  countText:   { fontSize: FONT_SIZE.xs, fontWeight: FONT_WEIGHT.bold, color: COLORS.textMuted },
-  countTextUrgent: { color: COLORS.pendingText },
-  urgentDot:   { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.activeOrange },
-
-  orderCard: {
-    backgroundColor: COLORS.cardBg,
-    borderRadius:    RADIUS.lg,
-    padding:         SPACING.md,
-    marginHorizontal:SPACING.lg,
-    marginBottom:    SPACING.sm,
+    flexDirection:    'row',
+    backgroundColor:  '#fff',
+    marginHorizontal: 16,
+    marginTop:        16,
+    marginBottom:     4,
+    borderRadius:     16,
+    paddingVertical:  16,
+    borderWidth:      0.5,
+    borderColor:      '#f0f0f0',
     ...SHADOW.sm,
   },
-  incomingCard: { borderLeftWidth: 3, borderLeftColor: COLORS.activeOrange },
-  readyCard:    { borderLeftWidth: 3, borderLeftColor: COLORS.infoText },
+  statCell:       { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3 },
+  statCellBorder: { borderRightWidth: 0.5, borderRightColor: '#f0f0f0' },
+  statValue:      { fontSize: 20, fontWeight: '800', color: '#1a1a2e' },
+  statLabel:      { fontSize: 10, color: '#999', textAlign: 'center' },
 
-  cardHead:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  orderId:   { fontSize: FONT_SIZE.lg, fontWeight: FONT_WEIGHT.bold, color: COLORS.dark },
-  timeAgo:   { color: COLORS.textMuted, fontSize: FONT_SIZE.xs, marginTop: 2 },
-  amountWrap:{ alignItems: 'flex-end' },
-  amount:    { color: COLORS.activeOrange, fontWeight: FONT_WEIGHT.bold, fontSize: FONT_SIZE.md },
-  itemCount: { color: COLORS.textMuted, fontSize: FONT_SIZE.xs, marginTop: 2 },
-  customer:  { color: COLORS.textBody, marginTop: SPACING.sm, fontSize: FONT_SIZE.sm },
-  address:   { color: COLORS.textMuted, fontSize: FONT_SIZE.xs, marginTop: 2 },
-
-  actionRow:  { flexDirection: 'row', gap: SPACING.sm, marginTop: SPACING.md },
-  declineBtn: {
-    paddingHorizontal: SPACING.lg,
-    paddingVertical:   SPACING.sm,
-    borderRadius:      RADIUS.pill,
-    borderWidth:       1,
-    borderColor:       COLORS.border,
-  },
-  declineText:{ color: COLORS.textBody, fontWeight: FONT_WEIGHT.semibold, fontSize: FONT_SIZE.sm },
-  acceptBtn:  {
-    paddingVertical:  SPACING.sm,
+  topItem: {
     flexDirection:    'row',
     alignItems:       'center',
-    justifyContent:   'center',
-    gap:              SPACING.xs,
-  },
-  acceptText:{ color: '#fff', fontWeight: FONT_WEIGHT.bold, fontSize: FONT_SIZE.sm },
-
-  emptyCard: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    gap:             SPACING.sm,
-    backgroundColor: COLORS.cardBg,
-    borderRadius:    RADIUS.lg,
-    padding:         SPACING.md,
-    marginHorizontal:SPACING.lg,
-    marginBottom:    SPACING.sm,
+    gap:              SPACING.sm,
+    backgroundColor:  '#fff',
+    borderRadius:     RADIUS.lg,
+    marginHorizontal: 16,
+    marginTop:        8,
+    marginBottom:     4,
+    padding:          SPACING.md,
     ...SHADOW.sm,
   },
-  emptyText: { color: COLORS.textMuted, fontSize: FONT_SIZE.sm },
+  topItemText: { color: COLORS.textMuted, fontSize: FONT_SIZE.sm, flex: 1 },
+
+  sectionHead: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    paddingHorizontal: 16,
+    paddingTop:     18,
+    paddingBottom:  8,
+    gap:            8,
+  },
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: '#1a1a2e', flex: 1 },
+  countBadge:   { borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2 },
+  countText:    { fontSize: 12, fontWeight: '700' },
+
+  orderCard: {
+    backgroundColor:  '#fff',
+    borderRadius:     14,
+    padding:          14,
+    marginHorizontal: 16,
+    marginBottom:     8,
+    borderWidth:      0.5,
+    borderColor:      '#eee',
+    ...SHADOW.sm,
+  },
+  incomingCard:  { borderLeftWidth: 3, borderLeftColor: '#ff6b00' },
+  preparingCard: { borderLeftWidth: 3, borderLeftColor: '#e63946' },
+  readyCard:     { borderLeftWidth: 3, borderLeftColor: '#2980b9' },
+  transitCard:   { borderLeftWidth: 3, borderLeftColor: '#16a34a' },
+
+  cardHead:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  orderId:   { fontSize: FONT_SIZE.md, fontWeight: FONT_WEIGHT.bold, color: '#1a1a2e' },
+  timeAgo:   { color: COLORS.textMuted, fontSize: FONT_SIZE.xs, marginTop: 2 },
+  amount:    { color: '#ff6b00', fontWeight: FONT_WEIGHT.bold, fontSize: FONT_SIZE.md },
+  itemCount: { color: COLORS.textMuted, fontSize: FONT_SIZE.xs, marginTop: 2 },
+  customer:  { color: '#555', marginTop: SPACING.sm, fontSize: FONT_SIZE.sm },
+  address:   { color: COLORS.textMuted, fontSize: FONT_SIZE.xs },
+
+  statusChip: {
+    borderRadius:      RADIUS.pill,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical:   2,
+  },
+  statusChipText: { fontSize: 10, fontWeight: '700' },
+
+  actionRow:    { flexDirection: 'row', gap: SPACING.sm, marginTop: SPACING.md },
+  rejectBtn: {
+    flex: 1, borderRadius: 10, paddingVertical: 10,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: '#e63946',
+  },
+  rejectText:   { color: '#e63946', fontWeight: FONT_WEIGHT.bold, fontSize: FONT_SIZE.sm },
+  acceptBtnWrap:{ flex: 1, borderRadius: 10, overflow: 'hidden' },
+  acceptBtn: {
+    paddingVertical: 10,
+    flexDirection:   'row',
+    alignItems:      'center',
+    justifyContent:  'center',
+    gap:             SPACING.xs,
+  },
+  acceptText:   { color: '#fff', fontWeight: FONT_WEIGHT.bold, fontSize: FONT_SIZE.sm },
+  markReadyBtn: {
+    backgroundColor: '#2980b9',
+    borderRadius:    10,
+    paddingVertical: 10,
+    flexDirection:   'row',
+    alignItems:      'center',
+    justifyContent:  'center',
+    gap:             SPACING.xs,
+  },
+
+  emptyCard: {
+    alignItems:       'center',
+    paddingVertical:  20,
+    marginHorizontal: 16,
+    marginBottom:     8,
+    gap:              6,
+  },
+  emptyText: { fontSize: 13, color: '#bbb' },
 });

@@ -1,8 +1,8 @@
-import { useEffect, useRef } from 'react';
+﻿import { useEffect, useRef } from 'react';
 import { View, Text, Animated, TouchableOpacity, StyleSheet, StatusBar } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, GRADIENTS, RADIUS, FONT_SIZE, FONT_WEIGHT, SPACING } from '../../../shared/theme';
+import { COLORS, GRADIENTS, RADIUS, FONT_SIZE, FONT_WEIGHT, SPACING } from 'shared/theme';
 
 export default function SplashScreen({ navigation }) {
   const logoScale    = useRef(new Animated.Value(0.55)).current;
@@ -79,7 +79,7 @@ export default function SplashScreen({ navigation }) {
       </Animated.View>
 
       {/* Bottom tagline */}
-      <Text style={styles.bottomNote}>M-Pesa · Airtel Money · Tigo Pesa · Cash</Text>
+      <Text style={styles.bottomNote}>M-Pesa · Airtel Money · Mixx by Yas · Cash</Text>
     </LinearGradient>
   );
 }

@@ -5,19 +5,26 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, GRADIENTS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../../../shared/theme';
-import { formatMoney, formatOrderId } from '../../../shared/formatters';
-import api from '../../../shared/api';
+import { COLORS, GRADIENTS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW } from 'shared/theme';
+import { formatMoney, formatOrderId } from 'shared/formatters';
+import api from 'shared/api';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
 import ErrorCard from '../components/ErrorCard';
-import RestaurantCard from '../../../shared/components/RestaurantCard';
-import LoadingSkeleton from '../../../shared/components/LoadingSkeleton';
+import RestaurantCard from 'shared/components/RestaurantCard';
+import LoadingSkeleton from 'shared/components/LoadingSkeleton';
 
 const CUISINE_KEYS = ['All', 'Tanzanian', 'Pizza', 'Seafood', 'Chicken', 'BBQ', 'Healthy', 'Burgers', 'Desserts'];
 const CUISINE_ICONS = {
-  All: 'restaurant-outline', Tanzanian: '🇹🇿', Pizza: '🍕', Seafood: '🐟',
-  Chicken: '🍗', BBQ: '🔥', Healthy: '🥗', Burgers: '🍔', Desserts: '🍨',
+  All:       'restaurant-outline',
+  Tanzanian: 'flag-outline',
+  Pizza:     'pizza-outline',
+  Seafood:   'fish-outline',
+  Chicken:   'fast-food-outline',
+  BBQ:       'flame-outline',
+  Healthy:   'leaf-outline',
+  Burgers:   'fast-food-outline',
+  Desserts:  'ice-cream-outline',
 };
 const ACTIVE_STATUSES = new Set(['placed', 'confirmed', 'preparing', 'ready', 'on_the_way']);
 
@@ -155,7 +162,6 @@ export default function Home({ navigation }) {
             const active = cuisine === key;
             const label  = t.categories[key] || key;
             const icon   = CUISINE_ICONS[key];
-            const isEmoji = icon && icon.length > 2;
             return (
               <TouchableOpacity
                 key={key}
@@ -166,9 +172,7 @@ export default function Home({ navigation }) {
                 style={[styles.chip, active && styles.chipActive]}
                 activeOpacity={0.75}
               >
-                {isEmoji
-                  ? <Text style={styles.chipEmoji}>{icon}</Text>
-                  : <Ionicons name={icon} size={14} color={active ? '#fff' : COLORS.textMuted} />}
+                <Ionicons name={icon} size={14} color={active ? '#fff' : COLORS.textMuted} />
                 <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
               </TouchableOpacity>
             );
@@ -393,7 +397,7 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, paddingVertical: SPACING.md, fontSize: FONT_SIZE.base, color: COLORS.textPrimary },
 
-  scroll:      { padding: SPACING.lg, paddingTop: 0, paddingBottom: 100 },
+  scroll:      { padding: SPACING.lg, paddingTop: 0, paddingBottom: 120 },
   chipsScroll: { marginHorizontal: -SPACING.lg },
   chips: { paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md, gap: SPACING.sm },
   chip: {

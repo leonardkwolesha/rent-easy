@@ -5,9 +5,9 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { COLORS, GRADIENTS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../../../shared/theme';
-import api from '../../../shared/api';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { COLORS, GRADIENTS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW, tabBar, tabColors } from 'shared/theme';
+import api from 'shared/api';
 import { useLang } from '../context/LanguageContext';
 
 // ── Animated typing dots ───────────────────────────────────────────────────
@@ -116,8 +116,11 @@ function QuickChips({ chips, onSend, loading }) {
 }
 
 // ── Main screen ────────────────────────────────────────────────────────────
-export default function ChatScreen({ navigation }) {
+export default function ChatScreen() {
   const { lang, setLang, t } = useLang();
+  const insets = useSafeAreaInsets();
+  // Space needed below input to clear the floating tab bar
+  const tabBarClearance = tabBar.height + Math.max(insets.bottom, tabBar.bottomGap);
 
   const [messages, setMessages] = useState([
     { id: '0', role: 'assistant', text: t.chatWelcome, ts: Date.now() },
@@ -162,16 +165,11 @@ export default function ChatScreen({ navigation }) {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.pageBg }} edges={['top']}>
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
+        style={{ flex: 1, marginBottom: tabBarClearance }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0}
       >
         {/* Header */}
         <LinearGradient colors={GRADIENTS.primary} style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} accessibilityLabel="Close chat" hitSlop={8}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
-
           <View style={styles.headerCenter}>
             <View style={styles.kebaBubble}>
               <Ionicons name="restaurant" size={16} color={COLORS.orange} />
@@ -211,6 +209,7 @@ export default function ChatScreen({ navigation }) {
           style={{ flex: 1 }}
           contentContainerStyle={styles.messageList}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
         >
           {messages.map((msg) => (
@@ -265,11 +264,14 @@ export default function ChatScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingTop: SPACING.sm, paddingBottom: SPACING.lg,
-    paddingHorizontal: SPACING.lg, gap: SPACING.md,
+    flexDirection:     'row',
+    alignItems:        'center',
+    justifyContent:    'space-between',
+    paddingTop:        SPACING.sm,
+    paddingBottom:     SPACING.lg,
+    paddingHorizontal: SPACING.lg,
   },
-  headerCenter: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
+  headerCenter: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, flex: 1 },
   kebaBubble: {
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center',

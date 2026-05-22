@@ -6,11 +6,11 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { COLORS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../../../shared/theme';
-import { formatMoney, formatOrderId } from '../../../shared/formatters';
-import api from '../../../shared/api';
-import { connectSocket } from '../../../shared/socket';
-import { setJSON } from '../../../shared/storage';
+import { COLORS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW } from 'shared/theme';
+import { formatMoney, formatOrderId } from 'shared/formatters';
+import api from 'shared/api';
+import { connectSocket } from 'shared/socket';
+import { setJSON } from 'shared/storage';
 import { useAuth } from '../context/AuthContext';
 import ErrorCard from '../components/ErrorCard';
 
@@ -140,6 +140,20 @@ export default function Dashboard({ navigation }) {
     }
   }, []);
 
+  // Check for an interrupted active delivery and redirect to Deliveries tab
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.get('/rider/orders/active');
+        if (res.data?.order) {
+          const { order } = res.data;
+          await setJSON('kebite_active_delivery', { orderId: order._id, order });
+          navigation.navigate('Deliveries', { orderId: order._id, order });
+        }
+      } catch {}
+    })();
+  }, []);
+
   useEffect(() => {
     fetchData();
     pollRef.current = setInterval(() => fetchData(true), POLL_MS);
@@ -148,8 +162,12 @@ export default function Dashboard({ navigation }) {
       const s = await connectSocket();
       if (s) {
         socketRef.current = s;
-        s.emit('rider:online', { riderId: user?._id });
+        // Join personal + role room so server can target this rider
+        s.emit('join', { userId: user?._id, role: 'rider' });
+        // Re-poll on any order status change
         s.on('order:statusUpdate', () => fetchData(true));
+        // Instant notification when a new order is ready for pickup
+        s.on('order:available', () => fetchData(true));
       }
       const { status } = await Location.requestForegroundPermissionsAsync();
       setLocGranted(status === 'granted');
@@ -158,8 +176,8 @@ export default function Dashboard({ navigation }) {
     return () => {
       clearInterval(pollRef.current);
       if (socketRef.current) {
-        socketRef.current.emit('rider:offline', { riderId: user?._id });
         socketRef.current.off('order:statusUpdate');
+        socketRef.current.off('order:available');
       }
     };
   }, [fetchData, user?._id]);
@@ -180,7 +198,8 @@ export default function Dashboard({ navigation }) {
       const res = await api.put(`/rider/orders/${orderId}/accept`);
       const order = res.data;
       await setJSON('kebite_active_delivery', { orderId, order });
-      navigation.navigate('ActiveDelivery', { orderId, order });
+      // Navigate to the dedicated Deliveries tab — that's the tracking screen
+      navigation.navigate('Deliveries', { orderId, order });
     } catch (err) {
       Alert.alert('Could not accept', err?.response?.data?.message || 'This order may have been taken.');
       fetchData(true);
@@ -358,7 +377,7 @@ export default function Dashboard({ navigation }) {
           data={orders}
           keyExtractor={(o) => o._id}
           renderItem={renderCard}
-          contentContainerStyle={{ paddingHorizontal: SPACING.lg, paddingBottom: 100 }}
+          contentContainerStyle={{ paddingHorizontal: SPACING.lg, paddingBottom: 120 }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}

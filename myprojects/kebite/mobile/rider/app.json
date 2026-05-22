@@ -12,10 +12,23 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Kebite to access your photos to update your profile picture.",
+          "cameraPermission": "Allow Kebite to use your camera to take a profile photo."
+        }
+      ]
+    ],
     "ios": {
       "supportsTablet": true,
       "config": {
         "googleMapsApiKey": "$GOOGLE_MAPS_API_KEY"
+      },
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow Kebite to use your camera to take a profile photo.",
+        "NSPhotoLibraryUsageDescription": "Allow Kebite to access your photos to update your profile picture."
       }
     },
     "android": {
@@ -28,7 +41,12 @@
         "googleMaps": {
           "apiKey": "$GOOGLE_MAPS_API_KEY"
         }
-      }
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"

@@ -3,12 +3,14 @@ import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView,
          KeyboardAvoidingView, Platform, StyleSheet, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { BRAND } from '../../../shared/theme';
-import { isValidEmail, isValidTzPhone, formatPhone } from '../../../shared/formatters';
-import { useAuth } from '../context/AuthContext';
+import { BRAND, COLORS } from 'shared/theme';
+import { isValidEmail, isValidTzPhone, formatPhone } from 'shared/formatters';
+import api from 'shared/api';
+
+const NAVY  = '#1a1a2e';
+const NAVY2 = '#16213e';
 
 export default function Register({ navigation }) {
-  const { register } = useAuth();
   const [name, setName]                       = useState('');
   const [email, setEmail]                     = useState('');
   const [phone, setPhone]                     = useState('');
@@ -26,29 +28,32 @@ export default function Register({ navigation }) {
 
   async function handleSubmit() {
     setError(null);
-    if (!name.trim())                  { setError('Please enter the owner name.'); return; }
-    if (!isValidEmail(email))          { setError('Enter a valid email address.'); return; }
-    if (!isValidTzPhone(phone))        { setError('Enter a valid Tanzanian phone number.'); return; }
-    if (!restaurantName.trim())        { setError('Please enter the restaurant name.'); return; }
-    if (!restaurantAddress.trim())     { setError('Please enter the street address.'); return; }
-    if (password.length < 6)           { setError('Password must be at least 6 characters.'); return; }
+    if (!name.trim())              { setError('Please enter the owner name.'); return; }
+    if (!isValidEmail(email))      { setError('Enter a valid email address.'); return; }
+    if (!isValidTzPhone(phone))    { setError('Enter a valid Tanzanian phone number.'); return; }
+    if (!restaurantName.trim())    { setError('Please enter the restaurant name.'); return; }
+    if (!restaurantAddress.trim()) { setError('Please enter the street address.'); return; }
+    if (password.length < 6)       { setError('Password must be at least 6 characters.'); return; }
 
     setLoading(true);
     try {
-      await register({
+      await api.post('/auth/register', {
         name:              name.trim(),
         email:             email.trim().toLowerCase(),
         phone:             formatPhone(phone),
         password,
         restaurantName:    restaurantName.trim(),
         restaurantAddress: restaurantAddress.trim(),
+        role:              'restaurant',
       });
       Alert.alert(
         'Account created',
-        'Your restaurant is pending approval. The Kebite team will review within 24 hours.'
+        'Your restaurant is pending approval. The Kebite team will review within 24 hours.',
+        [{ text: 'Sign in', onPress: () => navigation.navigate('Login') }]
       );
     } catch (err) {
-      setError(err?.response?.data?.message || 'Registration failed.');
+      console.error('[Register] error:', err?.response?.data ?? err.message);
+      setError(err?.response?.data?.message || 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -57,10 +62,11 @@ export default function Register({ navigation }) {
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-        <LinearGradient colors={BRAND.gradientPrimary} style={styles.header}>
+        <LinearGradient colors={[NAVY, NAVY2]} style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Back">
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
+          <Ionicons name="restaurant-outline" size={48} color={COLORS.orange} />
           <Text style={styles.title}>List your restaurant</Text>
           <Text style={styles.subtitle}>Reach customers across Dar es Salaam</Text>
         </LinearGradient>
@@ -101,7 +107,8 @@ export default function Register({ navigation }) {
           <Text style={styles.section}>About the restaurant</Text>
 
           <Text style={styles.label}>Restaurant name</Text>
-          <TextInput value={restaurantName} onChangeText={setRestaurantName} placeholder="e.g. Mama Lishe Kitchen"
+          <TextInput value={restaurantName} onChangeText={setRestaurantName}
+                     placeholder="e.g. Mama Lishe Kitchen"
                      placeholderTextColor="#aaa" style={styles.input} />
 
           <Text style={styles.label}>Street address</Text>
@@ -143,9 +150,14 @@ export default function Register({ navigation }) {
             accessibilityLabel="Create restaurant account"
             style={{ borderRadius: BRAND.cardRadius, overflow: 'hidden', marginTop: 12 }}
           >
-            <LinearGradient colors={BRAND.gradientPrimary} style={styles.btn}>
+            <LinearGradient colors={[COLORS.orange, COLORS.red]} style={styles.btn}>
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Create account</Text>}
             </LinearGradient>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => navigation.navigate('Login')} style={styles.linkRow} accessibilityLabel="Sign in">
+            <Text style={styles.linkText}>Already have an account? </Text>
+            <Text style={[styles.linkText, { color: COLORS.orange, fontWeight: '700' }]}>Sign in</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -154,12 +166,12 @@ export default function Register({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  header:          { paddingTop: 70, paddingBottom: 36, alignItems: 'center' },
+  header:          { paddingTop: 70, paddingBottom: 36, alignItems: 'center', gap: 8 },
   backBtn:         { position: 'absolute', top: 56, left: 16 },
-  title:           { color: '#fff', fontSize: 26, fontWeight: '700', marginTop: 8 },
+  title:           { color: '#fff', fontSize: 26, fontWeight: '700', marginTop: 4 },
   subtitle:        { color: '#fff', opacity: 0.9, marginTop: 4 },
   body:            { flex: 1, padding: 24, backgroundColor: BRAND.pageBg },
-  section:         { fontSize: 14, fontWeight: '700', color: BRAND.orange, marginTop: 8,
+  section:         { fontSize: 14, fontWeight: '700', color: COLORS.orange, marginTop: 8,
                      marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
   label:           { color: BRAND.dark, marginBottom: 6, fontWeight: '600' },
   input:           { backgroundColor: '#fff', borderRadius: BRAND.cardRadius, borderColor: '#eee',
@@ -176,7 +188,9 @@ const styles = StyleSheet.create({
                      marginBottom: 12, overflow: 'hidden' },
   passwordInput:   { flex: 1, padding: 14, fontSize: 16, color: BRAND.dark },
   eyeBtn:          { paddingHorizontal: 14, paddingVertical: 14 },
-  error:           { color: BRAND.red, marginVertical: 8, textAlign: 'center' },
+  error:           { color: COLORS.red, marginVertical: 8, textAlign: 'center' },
   btn:             { padding: 16, alignItems: 'center' },
   btnText:         { color: '#fff', fontSize: 16, fontWeight: '700' },
+  linkRow:         { flexDirection: 'row', justifyContent: 'center', marginTop: 18, marginBottom: 16 },
+  linkText:        { color: '#666' },
 });

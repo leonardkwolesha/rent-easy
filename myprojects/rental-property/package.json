@@ -1,0 +1,16 @@
+{
+  "name": "rental-property",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev",
+    "dev:all": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:mobile:tenant": "node mobile/sync-env.js && cd mobile/tenant && npx expo start",
+    "dev:mobile:landlord": "node mobile/sync-env.js && cd mobile/landlord && npx expo start",
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

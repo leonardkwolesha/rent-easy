@@ -3,8 +3,8 @@ import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView,
          KeyboardAvoidingView, Platform, StyleSheet, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { BRAND } from '../../../shared/theme';
-import { isValidEmail, isValidTzPhone, formatPhone } from '../../../shared/formatters';
+import { BRAND } from 'shared/theme';
+import { isValidEmail, isValidTzPhone, formatPhone } from 'shared/formatters';
 import { useAuth } from '../context/AuthContext';
 import PhoneInput from '../components/PhoneInput';
 

@@ -1,23 +1,41 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, ScrollView, Image, TouchableOpacity,
-  ActivityIndicator, StyleSheet,
+  ActivityIndicator, StyleSheet, Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, GRADIENTS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW } from '../../../shared/theme';
-import { formatMoney } from '../../../shared/formatters';
-import api from '../../../shared/api';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { COLORS, GRADIENTS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW, tabBar } from 'shared/theme';
+import { formatMoney } from 'shared/formatters';
+import api from 'shared/api';
 import { useCart } from '../context/CartContext';
 import ErrorCard from '../components/ErrorCard';
+
+const HERO_H = 280;
 
 export default function RestaurantDetail({ route, navigation }) {
   const { id }                                         = route.params;
   const { addToCart, removeFromCart, cartCount, cart } = useCart();
+  const insets                                         = useSafeAreaInsets();
   const [restaurant, setRestaurant] = useState(null);
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState(null);
   const [activeTab, setActiveTab]   = useState(null);
+  const [imageError, setImageError] = useState(false);
+
+  const infoAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (restaurant) {
+      Animated.timing(infoAnim, {
+        toValue:         1,
+        duration:        380,
+        delay:           80,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [restaurant]);
 
   useEffect(() => {
     let active = true;
@@ -56,10 +74,13 @@ export default function RestaurantDetail({ route, navigation }) {
     return cart.items.find((i) => i._id === itemId)?.quantity || 0;
   }
 
+  // Tab bar is hidden on this screen (HIDDEN_ON) — only account for device safe area
+  const cartBottom = insets.bottom + SPACING.lg;
+
   if (loading) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.pageBg }}>
-        <ActivityIndicator color={COLORS.orange} size="large" />
+        <ActivityIndicator color={COLORS.activeOrange} size="large" />
       </View>
     );
   }
@@ -70,41 +91,76 @@ export default function RestaurantDetail({ route, navigation }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.pageBg }}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 110 }} stickyHeaderIndices={[1]}>
-        {/* Banner + info — index 0 */}
-        <View>
-          <Image
-            source={{ uri: restaurant.image || `https://placehold.co/600x300/ff6b00/fff?text=🍽` }}
-            style={styles.banner}
-            resizeMode="cover"
-            onError={() => {}}
-          />
+      <ScrollView contentContainerStyle={{ paddingBottom: 120 }} stickyHeaderIndices={[1]}>
+
+        {/* Hero — index 0 */}
+        <View style={{ height: HERO_H }}>
+          {/* Gradient fallback — always rendered behind image */}
           <LinearGradient
-            colors={['rgba(0,0,0,0.5)', 'transparent']}
-            start={{ x: 0, y: 1 }}
-            end={{ x: 0, y: 0 }}
-            style={styles.bannerOverlay}
+            colors={[COLORS.dark, COLORS.activeOrange]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={StyleSheet.absoluteFill}
           />
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Back">
+          {/* Placeholder icon when there is no image */}
+          {(!restaurant.image || imageError) && (
+            <View style={styles.heroPlaceholder}>
+              <Ionicons name="restaurant" size={72} color="rgba(255,255,255,0.22)" />
+            </View>
+          )}
+          {/* Restaurant image */}
+          {!!restaurant.image && (
+            <Image
+              source={{ uri: restaurant.image }}
+              style={StyleSheet.absoluteFill}
+              resizeMode="cover"
+              onError={() => setImageError(true)}
+            />
+          )}
+          {/* Bottom scrim for text readability */}
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.78)']}
+            style={[StyleSheet.absoluteFill, { top: HERO_H * 0.35 }]}
+          />
+          {/* Back button — safe-area-aware */}
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={[styles.backBtn, { top: insets.top + 8 }]}
+            accessibilityLabel="Back"
+          >
             <Ionicons name="arrow-back" size={22} color="#fff" />
           </TouchableOpacity>
-
-          <View style={styles.infoCard}>
-            <Text style={styles.name}>{restaurant.name}</Text>
-            {restaurant.cuisine ? <Text style={styles.cuisineTag}>{restaurant.cuisine}</Text> : null}
-            <View style={styles.metaRow}>
-              <Ionicons name="star" size={14} color={COLORS.activeOrange} />
-              <Text style={styles.meta}>{(restaurant.rating || 4.5).toFixed(1)}</Text>
-              <Text style={styles.dot}>·</Text>
-              <Ionicons name="time-outline" size={14} color={COLORS.textMuted} />
-              <Text style={styles.meta}>{restaurant.deliveryTime || '25–35'} min</Text>
-              <Text style={styles.dot}>·</Text>
-              <Text style={styles.meta}>{formatMoney(restaurant.deliveryFee ?? 2000)} delivery</Text>
+          {/* Restaurant info — animated slide-up from hero bottom */}
+          <Animated.View
+            style={[
+              styles.heroInfo,
+              {
+                opacity:   infoAnim,
+                transform: [{
+                  translateY: infoAnim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }),
+                }],
+              },
+            ]}
+          >
+            <Text style={styles.heroName} numberOfLines={2}>{restaurant.name}</Text>
+            {restaurant.cuisine ? (
+              <View style={styles.cuisinePill}>
+                <Text style={styles.cuisinePillText}>{restaurant.cuisine}</Text>
+              </View>
+            ) : null}
+            <View style={styles.heroMeta}>
+              <Ionicons name="star" size={13} color="#FFD700" />
+              <Text style={styles.heroMetaText}>{(restaurant.rating || 4.5).toFixed(1)}</Text>
+              <Text style={styles.heroDot}>·</Text>
+              <Ionicons name="time-outline" size={13} color="rgba(255,255,255,0.8)" />
+              <Text style={styles.heroMetaText}>{restaurant.deliveryTime || '25–35'} min</Text>
+              <Text style={styles.heroDot}>·</Text>
+              <Text style={styles.heroMetaText}>{formatMoney(restaurant.deliveryFee ?? 2000)} delivery</Text>
             </View>
-          </View>
+          </Animated.View>
         </View>
 
-        {/* Sticky tab bar — index 1, becomes sticky */}
+        {/* Sticky category tab bar — index 1 */}
         <View style={styles.tabBarWrap}>
           <ScrollView
             horizontal
@@ -140,7 +196,7 @@ export default function RestaurantDetail({ route, navigation }) {
                   <Image source={{ uri: item.image }} style={styles.itemImage} resizeMode="cover" onError={() => {}} />
                 ) : (
                   <View style={[styles.itemImage, styles.itemImagePlaceholder]}>
-                    <Text style={{ fontSize: 26 }}>🍽</Text>
+                    <Ionicons name="restaurant-outline" size={26} color={COLORS.textMuted} />
                   </View>
                 )}
 
@@ -185,13 +241,13 @@ export default function RestaurantDetail({ route, navigation }) {
         </View>
       </ScrollView>
 
-      {/* Cart bar */}
+      {/* Cart bar — floats above the tab bar */}
       {cartCount > 0 && (
         <TouchableOpacity
           onPress={() => navigation.navigate('Checkout')}
           accessibilityLabel={`View cart — ${cartCount} item${cartCount === 1 ? '' : 's'}`}
           activeOpacity={0.9}
-          style={styles.cartBarWrap}
+          style={[styles.cartBarWrap, { bottom: cartBottom }]}
         >
           <LinearGradient colors={GRADIENTS.primary} style={styles.cartBar}>
             <View style={styles.cartBadge}>
@@ -207,27 +263,49 @@ export default function RestaurantDetail({ route, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  banner:        { width: '100%', height: 220, backgroundColor: COLORS.border },
-  bannerOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 80 },
+  heroPlaceholder: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems:     'center',
+    justifyContent: 'center',
+  },
   backBtn: {
     position:        'absolute',
-    top:             52,
     left:            SPACING.lg,
     backgroundColor: 'rgba(0,0,0,0.38)',
     padding:         SPACING.sm,
     borderRadius:    20,
+    zIndex:          10,
   },
-  infoCard: {
-    backgroundColor:   COLORS.cardBg,
-    padding:           SPACING.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+  heroInfo: {
+    position:          'absolute',
+    bottom:            0,
+    left:              0,
+    right:             0,
+    paddingHorizontal: SPACING.lg,
+    paddingBottom:     SPACING.lg,
   },
-  name:       { fontSize: FONT_SIZE.xxl, fontWeight: FONT_WEIGHT.bold, color: COLORS.dark },
-  cuisineTag: { color: COLORS.textMuted, fontSize: FONT_SIZE.sm, marginTop: 2 },
-  metaRow:    { flexDirection: 'row', alignItems: 'center', marginTop: SPACING.sm, gap: 4 },
-  meta:       { color: COLORS.textBody, fontSize: FONT_SIZE.sm },
-  dot:        { color: COLORS.border, marginHorizontal: 2 },
+  heroName: {
+    fontSize:         FONT_SIZE.xxl,
+    fontWeight:       FONT_WEIGHT.bold,
+    color:            '#fff',
+    textShadowColor:  'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  cuisinePill: {
+    alignSelf:         'flex-start',
+    backgroundColor:   'rgba(255,255,255,0.18)',
+    borderRadius:      12,
+    paddingHorizontal: 10,
+    paddingVertical:   3,
+    marginTop:         5,
+    borderWidth:       1,
+    borderColor:       'rgba(255,255,255,0.35)',
+  },
+  cuisinePillText: { color: '#fff', fontSize: FONT_SIZE.sm, fontWeight: FONT_WEIGHT.semibold },
+  heroMeta:     { flexDirection: 'row', alignItems: 'center', marginTop: SPACING.xs, gap: 4 },
+  heroMetaText: { color: 'rgba(255,255,255,0.9)', fontSize: FONT_SIZE.sm },
+  heroDot:      { color: 'rgba(255,255,255,0.45)', marginHorizontal: 2 },
 
   tabBarWrap: {
     backgroundColor:   COLORS.cardBg,
@@ -305,7 +383,6 @@ const styles = StyleSheet.create({
     position:     'absolute',
     left:         SPACING.lg,
     right:        SPACING.lg,
-    bottom:       SPACING.xl,
     borderRadius: RADIUS.xl,
     overflow:     'hidden',
     ...SHADOW.lg,

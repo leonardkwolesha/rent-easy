@@ -3,7 +3,10 @@ import { View, Text, TextInput, TouchableOpacity, ActivityIndicator,
          KeyboardAvoidingView, Platform, ScrollView, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { BRAND } from '../../../shared/theme';
+import { BRAND, COLORS } from 'shared/theme';
+
+const NAVY  = '#1a1a2e';
+const NAVY2 = '#16213e';
 import { useAuth } from '../context/AuthContext';
 
 export default function Login({ navigation }) {
@@ -22,7 +25,11 @@ export default function Login({ navigation }) {
     try {
       await login(email.trim().toLowerCase(), password);
     } catch (err) {
-      setError(err?.response?.data?.message || err.message || 'Login failed.');
+      const status = err?.response?.status;
+      if (!err?.response)      setError('Cannot connect to server. Check your internet connection.');
+      else if (status === 401) setError('Incorrect email or password.');
+      else if (status === 403) setError(err.response.data?.message || 'Account pending approval.');
+      else setError(err.response.data?.message || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -31,9 +38,9 @@ export default function Login({ navigation }) {
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
-        <LinearGradient colors={BRAND.gradientPrimary} style={styles.header}>
-          <Ionicons name="restaurant-outline" size={56} color="#fff" />
-          <Text style={styles.title}>Restaurant portal</Text>
+        <LinearGradient colors={[NAVY, NAVY2]} style={styles.header}>
+          <Ionicons name="restaurant-outline" size={56} color={COLORS.orange} />
+          <Text style={styles.title}>Restaurant Partner</Text>
           <Text style={styles.subtitle}>Manage your orders and menu</Text>
         </LinearGradient>
 
@@ -68,6 +75,14 @@ export default function Login({ navigation }) {
             </TouchableOpacity>
           </View>
 
+          <TouchableOpacity
+            onPress={() => navigation.navigate('ForgotPassword')}
+            style={styles.forgotRow}
+            accessibilityLabel="Forgot password"
+          >
+            <Text style={styles.forgotText}>Forgot password?</Text>
+          </TouchableOpacity>
+
           {error && <Text style={styles.error}>{error}</Text>}
 
           <TouchableOpacity
@@ -76,7 +91,7 @@ export default function Login({ navigation }) {
             accessibilityLabel="Sign in"
             style={{ borderRadius: BRAND.pillRadius, overflow: 'hidden', marginTop: 12 }}
           >
-            <LinearGradient colors={BRAND.gradientPrimary} style={styles.btn}>
+            <LinearGradient colors={[COLORS.orange, COLORS.red]} style={styles.btn}>
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Sign in</Text>}
             </LinearGradient>
           </TouchableOpacity>
@@ -112,6 +127,8 @@ const styles = StyleSheet.create({
                    marginBottom: 12, overflow: 'hidden' },
   passwordInput: { flex: 1, padding: 14, fontSize: 16, color: BRAND.dark },
   eyeBtn:        { paddingHorizontal: 14, paddingVertical: 14 },
+  forgotRow:     { alignSelf: 'flex-end', marginTop: 4, marginBottom: 4 },
+  forgotText:    { color: BRAND.orange, fontWeight: '600', fontSize: 13 },
   error:         { color: BRAND.red, marginVertical: 8, textAlign: 'center' },
   btn:           { paddingVertical: 14, paddingHorizontal: 24, alignItems: 'center' },
   btnText:       { color: '#fff', fontSize: 16, fontWeight: '700' },

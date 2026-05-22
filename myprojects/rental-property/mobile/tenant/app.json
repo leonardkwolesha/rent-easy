@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "RentEase Tenant",
+    "slug": "rentease-tenant",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": { "resizeMode": "contain", "backgroundColor": "#2563EB" },
+    "android": { "adaptiveIcon": { "backgroundColor": "#2563EB" }, "package": "com.rentease.tenant" },
+    "ios": { "bundleIdentifier": "com.rentease.tenant" }
+  }
+}

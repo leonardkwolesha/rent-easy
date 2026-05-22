@@ -1,15 +1,17 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+﻿import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, Animated,
-  RefreshControl, StyleSheet, Alert,
+  RefreshControl, StyleSheet, Alert, Modal, TextInput,
+  KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import {
   COLORS, RADIUS, SPACING, FONT_SIZE, FONT_WEIGHT, SHADOW,
-} from '../../../shared/theme';
-import { formatMoney, formatOrderId } from '../../../shared/formatters';
-import api from '../../../shared/api';
+} from 'shared/theme';
+import { formatMoney, formatOrderId } from 'shared/formatters';
+import api from 'shared/api';
+import { useAuth } from '../context/AuthContext';
 
 const NAVY  = '#1a1a2e';
 const NAVY2 = '#16213e';
@@ -50,13 +52,21 @@ function periodFilter(orders, period) {
   return orders.filter((o) => new Date(o.createdAt) >= cutoff);
 }
 
+const WITHDRAW_METHODS = [
+  { id: 'mpesa',  label: 'M-Pesa'       },
+  { id: 'airtel', label: 'Airtel Money'  },
+  { id: 'mixx',   label: 'Mixx by Yas'    },
+];
+
 export default function Earnings() {
-  const [analytics, setAnalytics] = useState(null);
-  const [history,   setHistory]   = useState([]);
-  const [loading,   setLoading]   = useState(true);
-  const [error,     setError]     = useState(null);
-  const [refreshing,setRefresh]   = useState(false);
-  const [period,    setPeriod]    = useState('Week');
+  const { user } = useAuth();
+  const [analytics,     setAnalytics]  = useState(null);
+  const [history,       setHistory]    = useState([]);
+  const [loading,       setLoading]    = useState(true);
+  const [error,         setError]      = useState(null);
+  const [refreshing,    setRefresh]    = useState(false);
+  const [period,        setPeriod]     = useState('Week');
+  const [withdrawOpen,  setWithdrawOpen] = useState(false);
 
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -89,19 +99,12 @@ export default function Earnings() {
     : periodEarnings;
 
   function onWithdraw() {
-    const bal = analytics?.weekEarnings || 0;
+    const bal = headerStat || 0;
     if (bal <= 0) {
       Alert.alert('Nothing to withdraw', 'Your balance is empty.');
       return;
     }
-    Alert.alert(
-      'Withdraw earnings',
-      `Send ${formatMoney(bal)} to your M-Pesa wallet?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Confirm', onPress: () => Alert.alert('Request sent', 'Your withdrawal is being processed.') },
-      ]
-    );
+    setWithdrawOpen(true);
   }
 
   return (
@@ -177,9 +180,176 @@ export default function Earnings() {
           }
         />
       )}
+
+      <WithdrawModal
+        visible={withdrawOpen}
+        balance={headerStat || 0}
+        phone={user?.phone}
+        onClose={() => setWithdrawOpen(false)}
+        onSuccess={() => { setWithdrawOpen(false); fetchAll(true); }}
+      />
     </View>
   );
 }
+
+function WithdrawModal({ visible, balance, phone, onClose, onSuccess }) {
+  const [amount, setAmount] = useState('');
+  const [tel,    setTel]    = useState('');
+  const [method, setMethod] = useState('mpesa');
+  const [busy,   setBusy]   = useState(false);
+  const [errMsg, setErrMsg] = useState('');
+
+  useEffect(() => {
+    if (visible) {
+      setAmount(String(Math.max(0, Math.floor(balance))));
+      setTel(phone || '');
+      setMethod('mpesa');
+      setErrMsg('');
+      setBusy(false);
+    }
+  }, [visible]);
+
+  function close() { if (!busy) onClose?.(); }
+
+  async function submit() {
+    const amt = parseInt(amount, 10);
+    if (!amt || amt < 1000) { setErrMsg('Minimum withdrawal is TSh 1,000'); return; }
+    if (!tel.trim())        { setErrMsg('Enter your phone number'); return; }
+    setErrMsg(''); setBusy(true);
+    try {
+      await api.post('/rider/withdraw', { amount: amt, phone: tel.trim(), method });
+      const label = WITHDRAW_METHODS.find((m) => m.id === method)?.label || 'mobile money';
+      Alert.alert('Withdrawal requested', `TSh ${amt.toLocaleString()} will be sent to your ${label} shortly.`);
+      onSuccess?.();
+    } catch (err) {
+      setErrMsg(err?.response?.data?.message || 'Could not process withdrawal. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={close}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={wStyles.backdrop}
+      >
+        <View style={wStyles.card}>
+          <View style={wStyles.handle} />
+          <Text style={wStyles.title}>Withdraw Earnings</Text>
+
+          <View style={wStyles.balanceRow}>
+            <Text style={wStyles.balanceLabel}>Available balance</Text>
+            <Text style={wStyles.balanceAmount}>{formatMoney(balance)}</Text>
+          </View>
+
+          <Text style={wStyles.fieldLabel}>AMOUNT (TSh)</Text>
+          <TextInput
+            value={amount}
+            onChangeText={(v) => { setAmount(v.replace(/[^0-9]/g, '')); setErrMsg(''); }}
+            placeholder="Enter amount"
+            placeholderTextColor={COLORS.textMuted}
+            keyboardType="numeric"
+            editable={!busy}
+            style={wStyles.input}
+          />
+
+          <Text style={wStyles.fieldLabel}>PHONE NUMBER</Text>
+          <TextInput
+            value={tel}
+            onChangeText={(v) => { setTel(v); setErrMsg(''); }}
+            placeholder="+255 7XX XXX XXX"
+            placeholderTextColor={COLORS.textMuted}
+            keyboardType="phone-pad"
+            editable={!busy}
+            style={wStyles.input}
+          />
+
+          <Text style={wStyles.fieldLabel}>PAYMENT METHOD</Text>
+          {WITHDRAW_METHODS.map((m) => (
+            <TouchableOpacity
+              key={m.id}
+              onPress={() => setMethod(m.id)}
+              style={[wStyles.methodRow, m.id === WITHDRAW_METHODS[WITHDRAW_METHODS.length - 1].id && { borderBottomWidth: 0 }]}
+            >
+              <Ionicons
+                name="phone-portrait-outline"
+                size={18}
+                color={method === m.id ? COLORS.orange : COLORS.textMuted}
+              />
+              <Text style={[wStyles.methodLabel, method === m.id && wStyles.methodLabelActive]}>
+                {m.label}
+              </Text>
+              <View style={[wStyles.radio, method === m.id && wStyles.radioActive]}>
+                {method === m.id && <View style={wStyles.radioDot} />}
+              </View>
+            </TouchableOpacity>
+          ))}
+
+          {errMsg ? <Text style={wStyles.errMsg}>{errMsg}</Text> : null}
+
+          <View style={wStyles.actions}>
+            <TouchableOpacity onPress={close} disabled={busy} style={[wStyles.btn, wStyles.btnCancel]}>
+              <Text style={wStyles.btnCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={submit} disabled={busy} style={[wStyles.btn, wStyles.btnPrimary]}>
+              {busy
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Text style={wStyles.btnPrimaryText}>Withdraw</Text>
+              }
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+const wStyles = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  card: {
+    backgroundColor: COLORS.cardBg,
+    borderTopLeftRadius:  RADIUS.xl,
+    borderTopRightRadius: RADIUS.xl,
+    padding: SPACING.xl,
+    paddingBottom: 40,
+  },
+  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: COLORS.border, alignSelf: 'center', marginBottom: SPACING.lg },
+  title: { color: NAVY, fontSize: FONT_SIZE.xl, fontWeight: FONT_WEIGHT.bold, marginBottom: SPACING.md },
+  balanceRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: 'rgba(26,26,46,0.06)', borderRadius: RADIUS.lg,
+    padding: SPACING.md, marginBottom: SPACING.md,
+  },
+  balanceLabel:  { color: COLORS.textMuted, fontSize: FONT_SIZE.sm },
+  balanceAmount: { color: NAVY, fontWeight: FONT_WEIGHT.bold, fontSize: FONT_SIZE.xl },
+  fieldLabel: {
+    color: COLORS.textMuted, fontSize: FONT_SIZE.xs, fontWeight: FONT_WEIGHT.bold,
+    letterSpacing: 0.5, marginTop: SPACING.md, marginBottom: SPACING.xs,
+  },
+  input: {
+    borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.lg,
+    paddingHorizontal: SPACING.md, paddingVertical: SPACING.md,
+    fontSize: FONT_SIZE.base, color: NAVY, backgroundColor: COLORS.pageBg,
+  },
+  methodRow: {
+    flexDirection: 'row', alignItems: 'center', gap: SPACING.md,
+    paddingVertical: SPACING.sm + 2,
+    borderBottomWidth: 1, borderBottomColor: COLORS.border,
+  },
+  methodLabel:       { flex: 1, color: COLORS.textBody, fontWeight: FONT_WEIGHT.semibold, fontSize: FONT_SIZE.base },
+  methodLabelActive: { color: COLORS.orange },
+  radio:     { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: COLORS.border, alignItems: 'center', justifyContent: 'center' },
+  radioActive: { borderColor: COLORS.orange },
+  radioDot:  { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.orange },
+  errMsg:    { color: COLORS.red, fontSize: FONT_SIZE.sm, marginTop: SPACING.sm },
+  actions:   { flexDirection: 'row', gap: SPACING.md, marginTop: SPACING.xl },
+  btn:       { flex: 1, paddingVertical: SPACING.md + 2, borderRadius: RADIUS.pill, alignItems: 'center' },
+  btnCancel:       { backgroundColor: '#f3f4f6' },
+  btnCancelText:   { color: COLORS.textMuted, fontWeight: FONT_WEIGHT.bold, fontSize: FONT_SIZE.base },
+  btnPrimary:      { backgroundColor: NAVY },
+  btnPrimaryText:  { color: '#fff', fontWeight: FONT_WEIGHT.bold, fontSize: FONT_SIZE.base },
+});
 
 function StatChip({ icon, label, value, unit }) {
   return (
@@ -279,7 +449,7 @@ const styles = StyleSheet.create({
   tabText:       { color: COLORS.textMuted, fontWeight: FONT_WEIGHT.semibold, fontSize: FONT_SIZE.sm },
   tabTextActive: { color: '#fff' },
 
-  list: { paddingHorizontal: SPACING.lg, paddingBottom: 80 },
+  list: { paddingHorizontal: SPACING.lg, paddingBottom: 120 },
 
   row: {
     flexDirection:   'row',

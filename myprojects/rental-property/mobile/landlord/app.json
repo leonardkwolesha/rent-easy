@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "RentEase Landlord",
+    "slug": "rentease-landlord",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": { "resizeMode": "contain", "backgroundColor": "#10B981" },
+    "android": { "adaptiveIcon": { "backgroundColor": "#10B981" }, "package": "com.rentease.landlord" },
+    "ios": { "bundleIdentifier": "com.rentease.landlord" }
+  }
+}

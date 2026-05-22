@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\HP\\\\Documents\\\\leonard\\\\myprojects\\\\rental-property\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(ls -la \"C:\\\\\\\\Users\\\\\\\\HP\\\\\\\\Documents\\\\\\\\leonard\\\\\\\\myprojects\\\\\\\\rental-property\")",
+      "Bash(find \"C:\\\\\\\\Users\\\\\\\\HP\\\\\\\\Documents\\\\\\\\leonard\\\\\\\\myprojects\\\\\\\\rental-property\" -type f -name \"*\")",
+      "Bash(find \"C:\\\\\\\\Users\\\\\\\\HP\\\\\\\\Documents\\\\\\\\leonard\\\\\\\\myprojects\\\\\\\\kebite\\\\\\\\server\" -maxdepth 2 -type f -name \"*.js\" -o -type d)",
+      "Bash(find \"C:\\\\\\\\Users\\\\\\\\HP\\\\\\\\Documents\\\\\\\\leonard\\\\\\\\myprojects\\\\\\\\kebite\\\\\\\\client\" -maxdepth 2 -type f -name \"*.jsx\" -o -type d)",
+      "Bash(ls -la \"C:\\\\\\\\Users\\\\\\\\HP\\\\\\\\Documents\\\\\\\\leonard\\\\\\\\myprojects\\\\\\\\kebite\\\\\\\\server\")",
+      "Bash(ls *)",
+      "Bash(find C:\\\\\\\\Users\\\\\\\\HP\\\\\\\\Documents\\\\\\\\leonard\\\\\\\\myprojects\\\\\\\\kebite *)",
+      "Bash(Get-ChildItem \"C:\\\\Users\\\\HP\\\\Documents\\\\leonard\\\\myprojects\\\\rental-property\" -Force)",
+      "Bash(Select-Object Name, Attributes)",
+      "Bash(npm install *)",
+      "Bash(dir C:\\\\Users\\\\HP\\\\Documents\\\\leonard\\\\myprojects\\\\rental-property\\\\client *)",
+      "Bash(npm run *)",
+      "Bash(node -e \"console.log\\(require\\('./node_modules/tailwindcss/package.json'\\).version\\)\")",
+      "Bash(npx vite *)",
+      "Bash(dir C:\\\\Users\\\\HP\\\\Documents\\\\leonard\\\\myprojects *)",
+      "Bash(xargs grep -l \"shared/\")",
+      "Bash(xargs sed -i \"s|'../../../shared/|'shared/|g; s|\\\\\"../../../shared/|\\\\\"shared/|g\")",
+      "Bash(ipconfig)",
+      "Bash(findstr \"expo-image\")",
+      "Bash(Start-Sleep -Seconds 4)",
+      "Bash(Get-Content \"C:\\\\Users\\\\HP\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-HP-Documents-leonard-myprojects-rental-property\\\\7ec4870c-ed79-4be8-a9e8-665619a9184a\\\\tasks\\\\bgoaey48m.output\" -Tail 20)",
+      "Bash(start chrome *)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :3000)",
+      "Bash(taskkill *)",
+      "Bash(cmd *)",
+      "PowerShell(Stop-Process *)",
+      "Bash(node -e \"const l = require\\('lucide-react'\\); const icons = ['CreditCard','CheckCircle','Wallet','AlertTriangle','Loader','RefreshCw','ChevronDown','Calendar','TrendingUp','Clock','Home','Zap']; icons.forEach\\(i => { if \\(!l[i]\\) console.log\\('MISSING:', i\\); else console.log\\('OK:', i\\); }\\);\")",
+      "Bash(node -e \"const l = require\\('lucide-react'\\); const icons = ['CheckCircle','X','Loader','ArrowRight','ArrowLeft','Phone','Hash','AlertCircle','Clock','Copy','Check','Shield']; icons.forEach\\(i => { if \\(!l[i]\\) console.log\\('MISSING:', i\\); else console.log\\('OK:', i\\); }\\);\")",
+      "Bash(npx eslint *)",
+      "Bash(node -e ' *)",
+      "Bash(git -C C:/Users/HP/Documents/leonard status --short)",
+      "Bash(git add *)"
+    ]
+  }
+}

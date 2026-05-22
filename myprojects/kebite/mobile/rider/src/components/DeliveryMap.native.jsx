@@ -1,5 +1,5 @@
 import MapView, { Marker } from 'react-native-maps';
-import { BRAND } from '../../../shared/theme';
+import { BRAND } from 'shared/theme';
 
 export default function DeliveryMap({ initialRegion, restaurantCoords, restaurantName, customerCoords, style }) {
   return (

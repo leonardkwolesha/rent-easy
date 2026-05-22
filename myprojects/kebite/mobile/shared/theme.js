@@ -112,6 +112,35 @@ export const BRAND = {
   currency:        'TSh',
 };
 
+// ── Floating pill tab bar ─────────────────────────────────────────────────
+export const tabBar = {
+  height:           64,
+  radius:           32,
+  horizontalInset:  16,
+  iconFrame:        26,
+  bottomGap:        14,
+  animDuration:     180,
+  activePillW:      72,
+  activePillH:      34,
+  activePillRadius: 17,
+};
+
+export function getTabBarPadding(insets) {
+  return {
+    paddingBottom: tabBar.height + Math.max((insets?.bottom ?? 0), tabBar.bottomGap) + 8,
+  };
+}
+
+// Shared color scheme for all three app tab bars
+export const tabColors = {
+  background:    '#111111',
+  activePill:    '#ff6b00',
+  activeIcon:    '#ffffff',
+  activeLabel:   '#ffffff',
+  inactiveIcon:  'rgba(255,255,255,0.45)',
+  inactiveLabel: 'rgba(255,255,255,0.35)',
+};
+
 export const ORDER_STATUSES = [
   'placed', 'confirmed', 'preparing', 'ready', 'on_the_way', 'delivered', 'cancelled',
 ];

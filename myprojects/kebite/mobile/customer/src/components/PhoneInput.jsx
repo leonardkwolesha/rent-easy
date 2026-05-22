@@ -1,5 +1,5 @@
 import { View, Text, TextInput, StyleSheet } from 'react-native';
-import { BRAND } from '../../../shared/theme';
+import { BRAND } from 'shared/theme';
 
 export default function PhoneInput({ value, onChangeText, placeholder = 'Phone number' }) {
   function handleChange(text) {
