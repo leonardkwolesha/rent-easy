@@ -23,3 +23,6 @@ build/
 
 # Env files (project-level .gitignore handles these too)
 .env
+
+# Other projects (tracked in separate repos)
+myprojects/kebite/
